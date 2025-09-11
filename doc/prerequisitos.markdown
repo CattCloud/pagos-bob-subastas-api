@@ -317,6 +317,7 @@ La funcionalidad de ofertar por subastas , no se incluye puesto que es un sistem
 - titulo
 - fecha_inicio*
 - fecha_fin*
+- fecha_limite_pago (Momento exacto hasta el cual el ganador puede pagar.)
 - estado (activa/finalizada/cancelada)
 - id_offerWin (es el id de la oferta que gano)
 - finished_at (Cuando ya paso la subasta a finalizado y se tiene un ganador establecido)

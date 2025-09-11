@@ -325,7 +325,7 @@ La funcionalidad de ofertar por subastas , no se incluye puesto que es un sistem
 
 ### **ENTIDAD 5: Offer(Ofertas)**
 
-**Representa: Todas las ofertas realizadas en una subasta**, no solo la ganadora.
+**Representa: Ofertas relevantes realizadas en una subasta**, no solo la ganadora hasta el ranking 3.
 
 **Atributos:**
 

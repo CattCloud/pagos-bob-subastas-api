@@ -205,6 +205,30 @@ La funcionalidad de ofertar por subastas , no se incluye puesto que es un sistem
 - Todo pago registrado DEBE ser validado manualmente por un admin
 - Un pago puede tener estados: Pendiente → Validado/Rechazado
 - Un pago rechazado requiere nuevo registro del cliente
+- **Definición automática de fecha de limite de pago:**
+    - Por defecto, el admin define un pago de subasta como no realizada si el cliente no realiza el pago(El estado de subasta pasa a vencida)
+    - Pero puede ser automatico y ajustable manualmente al crear la subasta (opcional) indicando una fecha de limite de pago.
+- **Cambio de estado automático:**
+    - Si llega la hora límite y no se realizo(todavia no validado) un pago de garantía, el estado de subasta pasa a vencida.
+    - Se genera penalidad para el ganador original y se reasigna al siguiente postor (si existe).
+- **Validación de pago:**
+    - Si el pago de garantía es realizado(todavía no validado) antes de fecha de limite de pago, el estado de la subasta pasa a finalizada.
+
+**RN05 - Reasignación de ganador y reactivación de subasta**
+
+Cuando el ganador original no realiza el pago de la garantía antes de la fecha limite de pago, ocurre lo siguiente:
+
+1. La subasta pasa a vencida temporalmente.
+2. **Reasignación:**
+    - Se selecciona la siguiente mejor oferta en el ranking de pujas.(Actualizando la informacio de oferta relacionada en la subasta)
+3. **Reactivación:**
+    - Se recalcula una fecha limite de pago(por defecto, 10:00 a.m. del día siguiente).
+    - Se cambia el estado de la subasta de vencida a activa nuevamente, pero ahora solo para el nuevo ganador.
+4. **Notificación:**
+    - Se genera una notificación para el nuevo ganador informando que ahora tiene derecho a pagar la garantía.
+    - Se genera una notificación para el ganador anterior indicando la penalidad aplicada.
+
+> Nota: Si no existen más postores elegibles, la subasta se cancela definitivamente (cancelada).
 
 ### **REGLAS DE SALDOS:**
 
@@ -318,7 +342,7 @@ La funcionalidad de ofertar por subastas , no se incluye puesto que es un sistem
 - fecha_inicio*
 - fecha_fin*
 - fecha_limite_pago (Momento exacto hasta el cual el ganador puede pagar.)
-- estado (activa/finalizada/cancelada)
+- estado activa, finalizada, cancelada, vencida)
 - id_offerWin (es el id de la oferta que gano)
 - finished_at (Cuando ya paso la subasta a finalizado y se tiene un ganador establecido)
 - pago_validado (Indica si el pago de la garantía fue validado)

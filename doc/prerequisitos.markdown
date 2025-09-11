@@ -361,6 +361,7 @@ Cuando el ganador original no realiza el pago de la garantía antes de la fecha 
 - monto_oferta* (Valor ofertado)
 - fecha_oferta*
 - posicion_ranking (1=ganador, 2=segundo, etc.)
+- fecha_asignacion_ganador (Fecha/hora en que esta oferta fue declarada ganadora)
 - estado (activa/ganadora/perdedora)
 
 ### **ENTIDAD 6: Guarantee_Payment (Pago de Garantía)**

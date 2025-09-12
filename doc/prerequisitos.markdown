@@ -330,6 +330,7 @@ Cuando el ganador original no realiza el pago de la garantía antes de la fecha 
 
 **Representa**: Subastas que **YA terminaron** (tiempo agotado) pero pueden tener diferentes estados:
 
+- `activa`: Se registro la subasta pero aun no se registra un ganador
 - `finalizada_con_ganador`: Hay ganador y pagó
 - `pendiente`: Ganador aun no pagó, posible pasó al siguiente
 - `cancelada`: Se canceló por algún motivo
@@ -342,7 +343,7 @@ Cuando el ganador original no realiza el pago de la garantía antes de la fecha 
 - fecha_inicio*
 - fecha_fin*
 - fecha_limite_pago (Momento exacto hasta el cual el ganador puede pagar.)
-- estado activa, finalizada, cancelada, vencida)
+- estado (activa,pendiente, finalizada, cancelada, vencida)
 - id_offerWin (es el id de la oferta que gano)
 - finished_at (Cuando ya paso la subasta a finalizado y se tiene un ganador establecido)
 - pago_validado (Indica si el pago de la garantía fue validado)

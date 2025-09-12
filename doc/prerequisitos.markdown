@@ -363,6 +363,11 @@ Cuando el ganador original no realiza el pago de la garantía antes de la fecha 
 - posicion_ranking (1=ganador, 2=segundo, etc.)
 - fecha_asignacion_ganador (Fecha/hora en que esta oferta fue declarada ganadora)
 - estado (activa/ganadora/perdedora)
+| Estado      | Significado                                                | Acciones que lo llevan a este estado                                         |
+| ----------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `activa`    | Ganador preliminar asignado, pendiente de pago de garantía | Admin registra ganador y se crea offer con estado `activa`                   |
+| `ganadora`  | Oferta confirmada, garantía pagada y validada              | Cuando el pago de garantía se confirma                                       |
+| `perdedora` | Oferta descartada, ya no es candidata                      | Cuando se reasigna el ganador a otro usuario o la subasta se cierra sin pago |
 
 ### **ENTIDAD 6: Guarantee_Payment (Pago de Garantía)**
 

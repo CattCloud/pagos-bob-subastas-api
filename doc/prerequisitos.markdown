@@ -333,7 +333,7 @@ Cuando el ganador original no realiza el pago de la garantía antes de la fecha 
 - `finalizada_con_ganador`: Hay ganador y pagó
 - `pendiente`: Ganador aun no pagó, posible pasó al siguiente
 - `cancelada`: Se canceló por algún motivo
-
+- `vencida`: El ganador no pago en la fecha limite de pago
 **Atributos:**
 
 - id (PK)

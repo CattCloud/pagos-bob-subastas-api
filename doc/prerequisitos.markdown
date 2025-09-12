@@ -338,7 +338,6 @@ Cuando el ganador original no realiza el pago de la garantía antes de la fecha 
 
 - id (PK)
 - asset_id (FK)*
-- titulo
 - fecha_inicio*
 - fecha_fin*
 - fecha_limite_pago (Momento exacto hasta el cual el ganador puede pagar.)

@@ -449,21 +449,18 @@ monto_disponible =
 - reference_type (`pago`, `subasta`, `reembolso`)
 - reference_id
 - created_at
-
+  
 | **Tipo Movimiento** | **¿Cuándo ocurre?** | **Efecto en Saldo** | **Descripción** | **Reference Type** | **Reference ID** |
 | --- | --- | --- | --- | --- | --- |
-| `retencion` | Cliente ganador registra pago de garantía (a espera de validación) | `saldo_total` ↑, `saldo_retenido` ↑ | "Pago de garantía de $X registrado - Pendiente de validación” | `pago` | `guarantee_payment.id` |
-| `garantia_validada` | Admin valida un pago de garantía registrado por cliente y se usa como parte del pago | `saldo_retenido`↓
-`saldo_aplicado` ↑ | "Pago de garantía de $X validado para subasta [vehiculo] y se usa como parte del pago" | `pago` | `guarantee_payment.id` |
-| `garantia_rechazada` | Admin rechaza un pago de garantía (datos incorrectos, monto erróneo, etc.) | Sin efecto en saldo(solo registro histórico) | "Pago de garantía de $X rechazado: [motivo]" | `pago` | `guarantee_payment.id` |
-| `penalidad` | Cliente ganó pero NO pagó garantía antes de 10am (30% de penalidad) | `saldo_disponible`↓
-`saldo_penalizado` ↑ | "Penalidad de $X aplicada por no pagar garantía a tiempo" | `subasta` | `auction.id` |
-| `reembolso_solicitado` | Cliente solicita reembolso de su saldo disponible | `saldo_disponible` ↓
-`saldo_en_reembolso` ↑ | "Reembolso de $X solicitado - En proceso de confirmación" | `reembolso` | `refund.id` |
-| `reembolso_aprobado` | Admin procesa reembolso (tipo "devolver_dinero") | `saldo_en_reembolso` ↓(dinero sale del sistema) | "Reembolso de $X procesado - Dinero transferido" | `reembolso` | `refund.id` |
-| `reembolso_como_saldo` | Cuando el cliente eligió "mantener_saldo” | `saldo_en_reembolso` ↓, `saldo_disponible` ↑ | "Reembolso de $X procesado - Saldo disponible aumenta" | `reembolso` | `refund.id` |
-| `reembolso_rechazado` | Admin rechaza solicitud de reembolso | `saldo_en_reembolso` ↓
-`saldo_disponible` ↑ | "Reembolso de $X rechazado: [motivo] - Saldo restaurado" | `reembolso` | `refund.id` |
+| `retencion` | Cliente ganador registra pago de garantía (a espera de validación) | `saldo_total` ↑<br>`saldo_retenido` ↑ | "Pago de garantía de $X registrado - Pendiente de validación” | `pago` | `guarantee_payment.id` |
+| `garantia_validada` | Admin valida un pago de garantía registrado por cliente y se usa como parte del pago | `saldo_retenido` ↓<br>`saldo_aplicado` ↑ | "Pago de garantía de $X validado para subasta [vehiculo] y se usa como parte del pago" | `pago` | `guarantee_payment.id` |
+| `garantia_rechazada` | Admin rechaza un pago de garantía (datos incorrectos, monto erróneo, etc.) | Sin efecto en saldo (solo registro histórico) | "Pago de garantía de $X rechazado: [motivo]" | `pago` | `guarantee_payment.id` |
+| `penalidad` | Cliente ganó pero NO pagó garantía antes de 10am (30% de penalidad) | `saldo_disponible` ↓<br>`saldo_penalizado` ↑ | "Penalidad de $X aplicada por no pagar garantía a tiempo" | `subasta` | `auction.id` |
+| `reembolso_solicitado` | Cliente solicita reembolso de su saldo disponible | `saldo_disponible` ↓<br>`saldo_en_reembolso` ↑ | "Reembolso de $X solicitado - En proceso de confirmación" | `reembolso` | `refund.id` |
+| `reembolso_aprobado` | Admin procesa reembolso (tipo "devolver_dinero") | `saldo_en_reembolso` ↓ (dinero sale del sistema) | "Reembolso de $X procesado - Dinero transferido" | `reembolso` | `refund.id` |
+| `reembolso_como_saldo` | Cuando el cliente eligió "mantener_saldo” | `saldo_en_reembolso` ↓<br>`saldo_disponible` ↑ | "Reembolso de $X procesado - Saldo disponible aumenta" | `reembolso` | `refund.id` |
+| `reembolso_rechazado` | Admin rechaza solicitud de reembolso | `saldo_en_reembolso` ↓<br>`saldo_disponible` ↑ | "Reembolso de $X rechazado: [motivo] - Saldo restaurado" | `reembolso` | `refund.id` |
+
 
 ### **ENTIDAD 9: Refund (Reembolsos)**
 

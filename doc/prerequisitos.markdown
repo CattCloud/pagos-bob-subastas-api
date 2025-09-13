@@ -382,6 +382,7 @@ Cuando el ganador original no realiza el pago de la garantía antes de la fecha 
 - auction_id (FK)* (Subasta relacionada)
 - offer_id (FK)*  (Oferta relacionada)
 - monto_garantia*
+- tipo_pago (Deposito o Transferencia)
 - numero_cuenta_origen* (Número de cuenta desde la que se hizo el pago)
 - voucher_url* (Enlace al archivo del comprobante)
 - comentarios

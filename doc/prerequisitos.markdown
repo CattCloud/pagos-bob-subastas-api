@@ -347,7 +347,6 @@ Cuando el ganador original no realiza el pago de la garantía antes de la fecha 
 - estado (activa,pendiente,en_validacion, finalizada, cancelada, vencida)
 - id_offerWin (es el id de la oferta que gano)
 - finished_at (Cuando ya paso la subasta a finalizado y se tiene un ganador establecido)
-- pago_validado (Indica si el pago de la garantía fue validado)
 - created_at
 - updated_at
 

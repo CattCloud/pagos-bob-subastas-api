@@ -388,7 +388,7 @@ Cuando el ganador original no realiza el pago de la garantía antes de la fecha 
 - comentarios
 - estado (pendiente/validado/rechazado)
 - fecha_pago (Fecha en que se hizo la transferencia)
-- fecha_validacion_rechazo (Cuándo fue validado o rechazado por el admin)
+- fecha_resolucion (Cuándo fue validado o rechazado por el admin)
 - billing_document_type (RUC/DNI) (Dato para facturacion)
 - billing_name (Escribir Razon Social o Nombre) (Dato para facturacion)
 - motivo_rechazo (opcional- se llena cuando se rechaza la garantia)

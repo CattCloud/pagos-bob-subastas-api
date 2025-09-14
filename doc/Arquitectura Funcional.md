@@ -26,23 +26,7 @@ La arquitectura funcional del sistema se organiza en dos grandes áreas: **Módu
     - Saldos disponibles y retenidos.
     - Movimientos detallados (pagos, penalidades, devoluciones).
     - Aplicación manual de ajustes o penalidades. (Opcional)
-4. **Gestión de Reembolsos**
-    
-    Módulo para procesar solicitudes de reembolso de garantías:
-    
-    - Revisión de solicitudes.
-    - Confirmación del tipo de reembolso con el cliente.
-    - Ejecución de reembolsos individuales o en lote.
 
-### **A FUTURO**
-
-1. **Dashboard Admin**
-    
-    Muestra un resumen general de la plataforma para el administrador: **¿Qué métricas específicas necesita ver el admin?** 
-    
-    - Número de subastas activas, finalizadas y canceladas.
-    - Alertas de pagos de garantía pendientes de validación.
-    - Métricas diarias (pagos recibidos, montos validados, reembolsos ejecutados).
 
 ### MÓDULOS CLIENTE (Ruta: `/pago-subastas`)
 
@@ -57,20 +41,43 @@ La arquitectura funcional del sistema se organiza en dos grandes áreas: **Módu
     - Selección de subasta.
     - Campo para adjuntar comprobante.
     - Confirmación visual del registro exitoso.
-3. **Consulta de Saldo**
-    
-    Vista donde el cliente puede revisar:
-    
-    - Saldo total.
-    - Saldo retenido por garantías vigentes.
-    - Saldo disponible para reembolso o uso en otras subastas.
+
 4. **Historial de Movimientos**
     
     Listado cronológico de transacciones:
     
     - Pagos, reembolsos, penalidades.
     - Filtros por fecha, tipo de movimiento o subasta.
-5. **Solicitud de Reembolso**
+
+
+### **A FUTURO**
+
+1. **Dashboard Admin**
+    
+    Muestra un resumen general de la plataforma para el administrador: **¿Qué métricas específicas necesita ver el admin?** 
+    
+    - Número de subastas activas, finalizadas y canceladas.
+    - Alertas de pagos de garantía pendientes de validación.
+    - Métricas diarias (pagos recibidos, montos validados, reembolsos ejecutados).
+
+2. **Dashboard Cliente**
+    
+    Vista principal del cliente, con resumen de:
+    
+    - Subastas en las que ha participado.
+    - Pagos realizados.
+    - Estado de su saldo (retenido, disponible, en devolución).
+
+3. **Gestión de Reembolsos - Admin** 
+    
+    Módulo para procesar solicitudes de reembolso de garantías:
+    
+    - Revisión de solicitudes.
+    - Confirmación del tipo de reembolso con el cliente.
+    - Ejecución de reembolsos individuales o en lote.
+
+
+4. **Solicitud de Reembolso - Cliente**
     
     Pantalla donde el cliente solicita devolución de garantías no usadas:
     
@@ -78,12 +85,11 @@ La arquitectura funcional del sistema se organiza en dos grandes áreas: **Módu
     - Seguimiento del estado (pendiente, aprobado, procesado).
     - Confirmación al completar la devolución.
 
-### A FUTURO
 
-1. **Dashboard Cliente**
+5. **Consulta de Saldo - Cliente**
     
-    Vista principal del cliente, con resumen de:
+    Vista donde el cliente puede revisar:
     
-    - Subastas en las que ha participado.
-    - Pagos realizados.
-    - Estado de su saldo (retenido, disponible, en devolución).
+    - Saldo total.
+    - Saldo retenido por garantías vigentes.
+    - Saldo disponible para reembolso o uso en otras subastas.

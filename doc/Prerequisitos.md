@@ -1,4 +1,5 @@
-# Proyecto Bob - Definicion de Preerequisitos
+# Proyecto Bob - Definicion de Prerequisitos (ACTUALIZADO)
+
 ## 1. Problema y objetivo del proyecto
 
 ### **¿Qué problema real resuelve la app?**
@@ -63,11 +64,7 @@ Tienen roles y permisos completamente diferentes:
     - Ver historial de sus movimientos (pagos, reembolsos)
     - Solicitar reembolsos de saldos no utilizados
 
-<aside>
-
-La funcionalidad de ofertar por subastas , no se incluye puesto que es un sistema de gestion de pagos y subastas, no de subastas en tiempo real(eso es el Sistema Web de BOB, nuestro sistema es complementario a eso)
-
-</aside>
+> **Nota:** La funcionalidad de ofertar por subastas no se incluye puesto que es un sistema de gestión de pagos y subastas, no de subastas en tiempo real (eso es el Sistema Web de BOB, nuestro sistema es complementario).
 
 ### **Característica importante:**
 
@@ -81,7 +78,7 @@ La funcionalidad de ofertar por subastas , no se incluye puesto que es un sistem
 
 ### **Gestión de Pagos de Garantía:**
 
-- **Como cliente**, quiero registrar mi pago de garantía (8% de mi oferta ganadora) para cumplir con los requisitos de la subasta antes de las 10am del día siguiente.
+- **Como cliente**, quiero registrar mi pago de garantía (8% de mi oferta ganadora) para cumplir con los requisitos de la subasta antes del tiempo límite establecido.
 
 ### **Consulta de Saldo:**
 
@@ -143,36 +140,36 @@ La funcionalidad de ofertar por subastas , no se incluye puesto que es un sistem
 - **Como cliente**, quiero ingresar los datos de mi pago (monto, comprobante, datos bancarios) para cumplir con el proceso
 - **Como admin**, quiero ver todos los pagos pendientes de validación para procesarlos con el banco
 - **Como admin**, quiero validar un pago de garantía (aprobar/rechazar) para actualizar el estado del cliente
-- **Como admin**, quiero ver el tiempo restante para validar pagos para cumplir con el límite de 10am
+- **Como admin**, quiero ver el tiempo restante para validar pagos para cumplir con los límites establecidos
 
 ### **MÓDULO 3: Gestión de Saldos**
 
 **Funcionalidades:**
 
 - **Como cliente**, quiero consultar mi saldo actual para saber cuánto dinero tengo retenido
-- **Como cliente**, quiero ver cómo se calculó mi saldo (pagos - usos) para tener transparencia (Cálculo automático de saldos por cliente,Aplicación automática de saldo al ganar subasta,Retención de saldo hasta fin de subasta)
+- **Como cliente**, quiero ver cómo se calculó mi saldo (pagos - usos) para tener transparencia
 - **Como admin**, quiero consultar el saldo de cualquier cliente para resolver consultas
-- **Como admin**, quiero ver un resumen de todos los saldos para control financiero general()
+- **Como admin**, quiero ver un resumen de todos los saldos para control financiero general
 
 ### **MÓDULO 4: Historial de Movimientos**
 
 **Funcionalidades:**
 
-- **Como cliente**, quiero ver mi historial completo de movimientos para hacer seguimiento de mi dinero (Registro de todos los movimientos por cliente-Visualización de historial personal (cliente))
+- **Como cliente**, quiero ver mi historial completo de movimientos para hacer seguimiento de mi dinero
 - **Como cliente**, quiero filtrar mis movimientos por fechas o tipo para encontrar información específica
-- **Como admin**, quiero ver el historial de movimientos de cualquier cliente para soporte y auditoría(Vista completa de movimientos por admin - Filtros por fechas, cliente, tipo de movimiento)
+- **Como admin**, quiero ver el historial de movimientos de cualquier cliente para soporte y auditoría
 
 ### **MÓDULO 5: Gestión de Reembolsos**
 
 **Funcionalidades:**
 
 - **Como cliente**, quiero solicitar reembolso de mi saldo para recuperar mi dinero no utilizado
-- **Como admin**, quiero ver todas las solicitudes de reembolso para procesarlas (Procesamiento de reembolsos en lote )
-- **Como admin**, quiero marcar reembolsos como procesados para llevar control del lote semanal (Estados de reembolso (solicitado/procesado/completado) - Cálculo de reembolsos totales/parciales)
+- **Como admin**, quiero ver todas las solicitudes de reembolso para procesarlas
+- **Como admin**, quiero marcar reembolsos como procesados para llevar control del lote semanal
 
 ---
 
-## 5. Reglas de negocio
+## 5. Reglas de negocio (ACTUALIZADAS)
 
 ### **REGLAS DE PAGOS DE GARANTÍA:**
 
@@ -181,111 +178,107 @@ La funcionalidad de ofertar por subastas , no se incluye puesto que es un sistem
 - El pago de garantía DEBE ser exactamente el 8% del monto de la oferta ganadora
 - Si el monto ingresado no coincide con el 8%, el sistema DEBE rechazar el pago
 
-**RN02 - Límite de Tiempo para Pago:**
+**RN02 - Registro Inmediato de Pago:**
 
-- El ganador tiene hasta las 10am del día siguiente al cierre de subasta para registrar su pago
-- A las 10:01am el sistema DEBE automáticamente marcar al ganador como "No pagó"
+- Cuando el cliente registra su pago en el sistema, inmediatamente se actualiza:
+  - `saldo_total += monto_garantia`
+  - `saldo_retenido += monto_garantia`
+- El saldo se marca como "pendiente de validación"
+- Solo después de validación del admin, el saldo puede ser utilizado
 
-**RN03 - Paso Automático al Siguiente Ganador:**
+**RN03 - Límite de Tiempo para Pago:**
 
-- Si el ganador no registra el pago antes de las 10am, el sistema DEBE automáticamente:
+- **Si se define fecha límite**: El ganador tiene hasta la fecha/hora especificada para registrar su pago
+- **Si no se define fecha límite**: El admin marca manualmente cuando considera que el tiempo se agotó
+- Al agotarse el tiempo, el sistema DEBE automáticamente marcar al ganador como "No pagó"
+
+**RN04 - Paso Automático al Siguiente Ganador:**
+
+- Si el ganador no registra el pago antes del límite (automático o manual), el sistema DEBE:
     - Pasar la victoria al siguiente ganador (segunda oferta más alta)
-    - Aplicar penalidad del 30% al ganador anterior (si tiene saldo disponible)
-    - Notificar al nuevo ganador que tiene hasta las 10am del siguiente día
+    - Aplicar penalidad del 30% al ganador anterior (solo hasta el saldo disponible)
+    - Notificar al nuevo ganador sobre su oportunidad de pago
 
-**RN04 - Moneda y Método de Pago:**
+**RN05 - Moneda y Método de Pago:**
 
 - Solo se aceptan pagos en dólares (USD) por transferencia bancaria o depósito
 - Cualquier pago en otra moneda o método DEBE ser rechazado
 
 ### **REGLAS DE VALIDACIÓN DE PAGOS:**
 
-**RN05 - Proceso de Validación:**
+**RN06 - Proceso de Validación:**
 
 - Todo pago registrado DEBE ser validado manualmente por un admin
-- Un pago puede tener estados: Pendiente → Validado/Rechazado
+- Estados posibles: Pendiente → Validado/Rechazado
+- **Si se aprueba**: `saldo_retenido -= monto` y `saldo_aplicado += monto`
+- **Si se rechaza**: `saldo_retenido -= monto` (el saldo_total se mantiene para historial)
 - Un pago rechazado requiere nuevo registro del cliente
-- **Definición automática de fecha de limite de pago:**
-    - Por defecto, el admin define un pago de subasta como no realizada si el cliente no realiza el pago(El estado de subasta pasa a vencida)
-    - Pero puede ser automatico y ajustable manualmente al crear la subasta (opcional) indicando una fecha de limite de pago.
-- **Cambio de estado automático:**
-    - Si llega la hora límite y no se realizo(todavia no validado) un pago de garantía, el estado de subasta pasa a vencida.
-    - Se genera penalidad para el ganador original y se reasigna al siguiente postor (si existe).
-- **Validación de pago:**
-    - Si el pago de garantía es realizado(todavía no validado) antes de fecha de limite de pago, el estado de la subasta pasa a finalizada.
 
-**RN05 - Reasignación de ganador y reactivación de subasta**
+**RN07 - Estados de Subasta:**
 
-Cuando el ganador original no realiza el pago de la garantía antes de la fecha limite de pago, ocurre lo siguiente:
+Los estados de subasta siguen este flujo:
+- `activa` → Subasta creada, sin ganador asignado
+- `pendiente` → Ganador asignado, esperando que registre pago
+- `en_validacion` → Cliente registró pago, admin debe validar
+- `finalizada` → Pago validado y completado
+- `vencida` → Tiempo límite agotado, ganador no pagó
+- `cancelada` → Cancelada manualmente por admin
 
-1. La subasta pasa a vencida temporalmente.
-2. **Reasignación:**
-    - Se selecciona la siguiente mejor oferta en el ranking de pujas.(Actualizando la informacio de oferta relacionada en la subasta)
-3. **Reactivación:**
-    - Se recalcula una fecha limite de pago(por defecto, 10:00 a.m. del día siguiente).
-    - Se cambia el estado de la subasta de vencida a activa nuevamente, pero ahora solo para el nuevo ganador.
-4. **Notificación:**
-    - Se genera una notificación para el nuevo ganador informando que ahora tiene derecho a pagar la garantía.
-    - Se genera una notificación para el ganador anterior indicando la penalidad aplicada.
+**RN08 - Reasignación de Ganador:**
 
-> Nota: Si no existen más postores elegibles, la subasta se cancela definitivamente (cancelada).
+Cuando el ganador original no realiza el pago antes del límite:
 
-### **REGLAS DE SALDOS:**
+1. La subasta pasa a `vencida` temporalmente
+2. **Reasignación**: Se selecciona la siguiente mejor oferta
+3. **Reactivación**: Se puede establecer nueva fecha límite o manejo manual
+4. **Notificación**: Se informa al nuevo ganador y se aplica penalidad al anterior
 
-**RN06 - Retención y Uso de Saldo:**
+### **REGLAS DE SALDOS (ACTUALIZADAS):**
 
-- El saldo se mantiene retenido hasta que termine la subasta
-- Si gana: saldo se usa automáticamente como parte del pago final
-- Si no gana: saldo queda disponible para futuras subastas o reembolso
+**RN09 - Cálculo de Saldo Disponible:**
 
-**RN07 - Cálculo de Saldo:**
+```
+saldo_disponible = saldo_total - saldo_retenido - saldo_aplicado - saldo_en_reembolso - saldo_penalizado
+```
 
-- Saldo = Pagos validados - Saldos utilizados - Reembolsos procesados
-- El saldo NUNCA puede ser negativo
+**RN10 - Múltiples Pagos Simultáneos:**
 
-**RN08 - Aplicación de Penalidades:**
+- Un cliente PUEDE tener múltiples pagos pendientes para diferentes subastas
+- Cada pago se registra independientemente en `Guarantee_Payment`
+- El `saldo_retenido` suma todos los montos en proceso de validación
 
-- La penalidad del 30% se descuenta automáticamente del saldo disponible
-- Si no tiene saldo suficiente, queda como deuda pendiente
+**RN11 - Aplicación de Penalidades:**
+
+- La penalidad del 30% se descuenta SOLO del saldo disponible
+- Si no tiene saldo suficiente, se aplica hasta donde alcance
+- El resto se perdona (no genera deuda)
+- Se registra el movimiento para auditoría
 
 ### **REGLAS DE REEMBOLSOS:**
 
-**RN09 - Solicitud de Reembolso:**
+**RN12 - Solicitud de Reembolso:**
 
-- Un cliente puede solicitar reembolso de saldo no retenido cualquier día
-- La empresa DEBE llamar al cliente para confirmar: mantener como saldo o devolver dinero
+- Un cliente puede solicitar reembolso de saldo disponible cualquier día
+- La empresa DEBE confirmar con el cliente: mantener como saldo o devolver dinero
 
-**RN10 - Cambio de Decisión:**
-
-- Un cliente PUEDE cambiar su decisión de reembolso mientras esté en estado "Solicitado"
-- NO puede cambiar si ya está "En proceso" o "Procesado"
-
-**RN11 - Procesamiento:**
+**RN13 - Procesamiento:**
 
 - Los reembolsos pueden procesarse cualquier día de la semana
 - Una vez procesado, NO se puede revertir
 
 ### **REGLAS DE ACCESO:**
 
-**RN12 - Diferenciación por Rutas:**
+**RN14 - Diferenciación por Rutas:**
 
 - Admin: acceso SOLO por `/admin-subastas`
 - Cliente: acceso SOLO por `/pago-subastas`
 - Sin autenticación tradicional
 
-**RN13 - Permisos por Rol:**
+**RN15 - Identificación de Usuarios:**
 
-- Admin: puede gestionar todo el sistema
-- Cliente: solo puede ver y gestionar sus propios datos
-
-### REGLA DE IDENTIFICACION EN EL SISTEMA
-
-**RN14 - Identificación de Usuarios:**
-
-- En la ruta `/pago-subastas`, al acceder , el cliente DEBE seleccionar su tipo e ingresar su número de documento para acceder a sus datos
-- El sistema DEBE validar que el documento existe en la base de datos antes de mostrar información
-- En la ruta `/admin-subastas`, el sistema accederá automáticamente con los datos del **único admin registrado**
-- Si un documento no existe en el sistema, DEBE mostrar mensaje de error y no permitir acceso
+- En `/pago-subastas`: cliente selecciona tipo de documento e ingresa número para acceder
+- En `/admin-subastas`: acceso automático con datos del admin registrado
+- Si un documento no existe, DEBE mostrar error y no permitir acceso
 
 ---
 
@@ -496,4 +489,26 @@ Estados
 
 ## 7. Requisitos no funcionales
 
-- Sera responsive (Movil - Desktop)
+- **Responsive Design**: Compatible con móvil y desktop
+- **Storage**: Archivos almacenados en Cloudinary
+- **Performance**: Carga rápida de listados con paginación
+- **Seguridad**: Validación de sesiones temporales
+- **Usabilidad**: Interfaz intuitiva para usuarios no técnicos
+
+---
+
+## 8. Navegación del Sistema
+
+### **CLIENTE - Menú Lateral:**
+-  **Mis Garantías** (pantalla principal)
+-  **Pagar Garantía**
+-  **Mi Saldo**
+-  **Historial de Movimientos**
+-  **Solicitar Reembolso**
+
+### **ADMIN - Menú Lateral:**
+-  **Pagos de Garantía** (pantalla principal)
+-  **Gestión de Subastas**
+-  **Nueva Subasta**
+-  **Gestión de Saldos**
+-  **Gestión de Reembolsos**

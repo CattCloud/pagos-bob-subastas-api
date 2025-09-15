@@ -246,8 +246,7 @@ Como administrador, quiero rechazar un pago de garantía inválido especificando
     - Crear `Movement` tipo `garantia_rechazada`
     - Actualizar estado de la subasta a `pendiente`
     - Revertir saldo del cliente:
-        - `User_Balance.saldo_retenido -= monto_garantia`
-        - `User_Balance.saldo_total -= monto_garantia`
+        - `User_Balance.saldo_retenido -= monto_garantia` (NO tocar saldo_total - se mantiene para historial)
 
 ### **Validaciones de Negocio**
 

@@ -182,6 +182,9 @@ Como cliente, quiero revisar toda la información antes de confirmar el registro
     - Todos los datos del formulario
     - `estado = pendiente`
     - `created_at = now()`
+-**CA-03:** Actualizar User_Balance:
+    - saldo_total += monto_garantia
+    - saldo_retenido += monto_garantia
 - **CA-03:** Actualizar `User_Balance.saldo_retenido += monto_garantia`
 - **CA-04:** Crear registro en `Movement` tipo `retencion`
 - CA-05 : Actualizar el estado de la subasta relacionada `Auction.estado=en_validacion`

@@ -160,7 +160,7 @@ Como administrador, quiero asignar el ganador preliminar de una subasta finaliza
 - **VN-03:** `monto_oferta > 0` y `<= 999,999.99`
 - **VN-04:** `fecha_oferta` dentro del rango de subasta (`fecha_inicio` ≤ fecha ≤ `fecha_fin`)
 - **VN-05:** `user_id` debe existir y ser tipo cliente.
-- **VN-06:** Usuario no puede tener otra oferta registrada en la misma subasta.
+
 
 ---
 

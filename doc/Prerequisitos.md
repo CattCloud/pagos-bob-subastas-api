@@ -206,13 +206,13 @@ La funcionalidad de ofertar por subastas , no se incluye puesto que es un sistem
 - Un pago puede tener estados: Pendiente → Validado/Rechazado
 - Un pago rechazado requiere nuevo registro del cliente
 - **Definición automática de fecha de limite de pago:**
-    - Por defecto, el admin define un pago de subasta como no realizada si el cliente no realiza el pago(El estado de subasta pasa a vencida)
-    - Pero puede ser automatico y ajustable manualmente al crear la subasta (opcional) indicando una fecha de limite de pago.
+    - Por defecto, el admin define una subasta como vencida si el cliente no realiza el pago(El estado de subasta pasa a vencida) pero en caso se halla indicado una fecha de limite de pago, entonces se usa esa fecha , se calcula y se define automaticamente la subasta como vencida 
+    - El admin define la fecha limite al registrar un ganador, no siempre se define, es opcional
 - **Cambio de estado automático:**
     - Si llega la hora límite y no se realizo(todavia no validado) un pago de garantía, el estado de subasta pasa a vencida.
     - Se genera penalidad para el ganador original y se reasigna al siguiente postor (si existe).
 - **Validación de pago:**
-    - Si el pago de garantía es realizado(todavía no validado) antes de fecha de limite de pago, el estado de la subasta pasa a finalizada.
+    - Si el pago de garantía es realizado(todavía no validado) antes de fecha de limite de pago, el estado de la subasta pasa a en_validacion.
 
 **RN05 - Reasignación de ganador y reactivación de subasta**
 
@@ -331,7 +331,7 @@ Cuando el ganador original no realiza el pago de la garantía antes de la fecha 
 **Representa**: Subastas que **YA terminaron** (tiempo agotado) pero pueden tener diferentes estados:
 
 - `activa`: Se registro la subasta pero aun no se registra un ganador
-- `finalizada_con_ganador`: Hay ganador ,el cliente pagó y se valido
+- `finalizada`: Hay ganador ,el cliente pagó y se valido
 - `pendiente`: Ganador aun no pagó, posible pasó al siguiente
 - `en_validacion` : Después de que el cliente registra pago, pero aún no está validado
 - `cancelada`: Se canceló por algún motivo
@@ -451,9 +451,13 @@ monto_disponible =
 - reference_id
 - created_at
   
+  pago = guarantee_payment
+  subasta = auction
+  reembolso = refund
+
 | **Tipo Movimiento** | **¿Cuándo ocurre?** | **Efecto en Saldo** | **Descripción** | **Reference Type** | **Reference ID** |
 | --- | --- | --- | --- | --- | --- |
-| `retencion` | Cliente ganador registra pago de garantía (a espera de validación) | `saldo_total` ↑<br>`saldo_retenido` ↑ | "Pago de garantía de $X registrado - Pendiente de validación” | `pago` | `guarantee_payment.id` |
+| `retencion` | Representa  un pago de garantia registrado, Cliente ganador registra pago de garantía (a espera de validación) | `saldo_total` ↑<br>`saldo_retenido` ↑ | "Pago de garantía de $X registrado - Pendiente de validación” | `pago` | `guarantee_payment.id` |
 | `garantia_validada` | Admin valida un pago de garantía registrado por cliente y se usa como parte del pago | `saldo_retenido` ↓<br>`saldo_aplicado` ↑ | "Pago de garantía de $X validado para subasta [vehiculo] y se usa como parte del pago" | `pago` | `guarantee_payment.id` |
 | `garantia_rechazada` | Admin rechaza un pago de garantía (datos incorrectos, monto erróneo, etc.) | Sin efecto en saldo (solo registro histórico) | "Pago de garantía de $X rechazado: [motivo]" | `pago` | `guarantee_payment.id` |
 | `penalidad` | Cliente ganó pero NO pagó garantía antes de 10am (30% de penalidad) | `saldo_disponible` ↓<br>`saldo_penalizado` ↑ | "Penalidad de $X aplicada por no pagar garantía a tiempo" | `subasta` | `auction.id` |

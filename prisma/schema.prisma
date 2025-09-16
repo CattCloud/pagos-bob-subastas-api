@@ -1,0 +1,172 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id              String  @id @default(cuid())
+  first_name      String
+  last_name       String
+  email           String  @unique
+  phone_number    String?
+  document_type   String? // DNI, CE, RUC, Pasaporte - nullable para admin
+  document_number String  @unique // Para identificación de clientes
+  user_type       String  @default("client") // admin/client
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  deleted_at      DateTime?
+
+  // Relaciones
+  offers            Offer[]
+  guarantee_payments GuaranteePayment[]
+  user_balance      UserBalance?
+  movements         Movement[]
+  refunds           Refund[]
+
+  @@map("users")
+}
+
+model Asset {
+  id                    String   @id @default(cuid())
+  placa                 String   @unique
+  empresa_propietaria   String
+  marca                 String?
+  modelo                String?
+  año                   Int?
+  estado                String   @default("disponible") // disponible, vendido, retirado
+  descripcion           String?
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  // Relaciones
+  auctions Auction[]
+
+  @@map("assets")
+}
+
+model Auction {
+  id                  String    @id @default(cuid())
+  asset_id            String
+  fecha_inicio        DateTime
+  fecha_fin           DateTime
+  fecha_limite_pago   DateTime?
+  estado              String    @default("activa") // activa, pendiente, en_validacion, finalizada, cancelada, vencida
+  id_offerWin         String?   // ID de la oferta ganadora
+  finished_at         DateTime?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  // Relaciones
+  asset               Asset     @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+  offers              Offer[]
+  guarantee_payments  GuaranteePayment[]
+
+  @@map("auctions")
+}
+
+model Offer {
+  id                        String    @id @default(cuid())
+  auction_id                String
+  user_id                   String
+  monto_oferta              Decimal   @db.Decimal(10, 2)
+  fecha_oferta              DateTime
+  posicion_ranking          Int?      // 1=ganador, 2=segundo, etc.
+  fecha_asignacion_ganador  DateTime?
+  estado                    String    @default("activa") // activa, ganadora, perdedora
+  created_at                DateTime  @default(now())
+  updated_at                DateTime  @updatedAt
+
+  // Relaciones
+  auction           Auction            @relation(fields: [auction_id], references: [id], onDelete: Cascade)
+  user              User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  guarantee_payment GuaranteePayment?
+
+  @@map("offers")
+}
+
+model GuaranteePayment {
+  id                      String    @id @default(cuid())
+  user_id                 String
+  auction_id              String
+  offer_id                String    @unique
+  monto_garantia          Decimal   @db.Decimal(10, 2)
+  tipo_pago               String    // Deposito, Transferencia
+  numero_cuenta_origen    String
+  voucher_url             String
+  comentarios             String?
+  estado                  String    @default("pendiente") // pendiente, validado, rechazado
+  fecha_pago              DateTime
+  fecha_resolucion        DateTime?
+  billing_document_type   String    // RUC, DNI
+  billing_name            String    // Razón Social o Nombre
+  motivo_rechazo          String?
+  created_at              DateTime  @default(now())
+  updated_at              DateTime  @updatedAt
+
+  // Relaciones
+  user      User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  auction   Auction @relation(fields: [auction_id], references: [id], onDelete: Cascade)
+  offer     Offer   @relation(fields: [offer_id], references: [id], onDelete: Cascade)
+
+  @@map("guarantee_payments")
+}
+
+model UserBalance {
+  id                    String   @id @default(cuid())
+  user_id               String   @unique
+  saldo_total           Decimal  @default(0) @db.Decimal(10, 2)
+  saldo_retenido        Decimal  @default(0) @db.Decimal(10, 2)
+  saldo_aplicado        Decimal  @default(0) @db.Decimal(10, 2)
+  saldo_en_reembolso    Decimal  @default(0) @db.Decimal(10, 2)
+  saldo_penalizado      Decimal  @default(0) @db.Decimal(10, 2)
+  updated_at            DateTime @updatedAt
+
+  // Relaciones
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("user_balances")
+}
+
+model Movement {
+  id                String   @id @default(cuid())
+  user_id           String
+  tipo_movimiento   String   // retencion, garantia_validada, garantia_rechazada, penalidad, reembolso_solicitado, etc.
+  monto             Decimal  @db.Decimal(10, 2)
+  descripcion       String
+  reference_type    String   // pago, subasta, reembolso
+  reference_id      String
+  created_at        DateTime @default(now())
+
+  // Relaciones
+  user              User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  // Nota: reference_id es polimórfico, se resuelve en código según reference_type
+
+  @@map("movements")
+}
+
+model Refund {
+  id                        String    @id @default(cuid())
+  user_id                   String
+  monto_solicitado          Decimal   @db.Decimal(10, 2)
+  tipo_reembolso            String    // mantener_saldo, devolver_dinero
+  estado                    String    @default("solicitado") // solicitado, confirmado, rechazado, procesado, cancelado
+  fecha_solicitud           DateTime  @default(now())
+  fecha_respuesta_empresa   DateTime?
+  fecha_procesamiento       DateTime?
+  motivo                    String?
+  created_at                DateTime  @default(now())
+  updated_at                DateTime  @updatedAt
+
+  // Relaciones
+  user      User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("refunds")
+}

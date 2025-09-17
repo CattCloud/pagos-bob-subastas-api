@@ -2,68 +2,68 @@
 
 ## ENDPOINTS DISPONIBLES
 
-### **AUTENTICACIÓN** (`/api/auth`)
-- `POST /api/auth/client-login` - Login de cliente por documento
-- `POST /api/auth/admin-access` - Acceso automático de admin
-- `POST /api/auth/logout` - Cerrar sesión
-- `GET /api/auth/session` - Validar sesión activa
-- `GET /api/auth/sessions/stats` - Estadísticas de sesiones (Admin)
+### **AUTENTICACIÓN** (`/auth`)
+- `POST /auth/client-login` - Login de cliente por documento
+- `POST /auth/admin-access` - Acceso automático de admin
+- `POST /auth/logout` - Cerrar sesión
+- `GET /auth/session` - Validar sesión activa
+- `GET /auth/sessions/stats` - Estadísticas de sesiones (Admin)
 
-### **SUBASTAS** (`/api/auctions`)
-- `GET /api/auctions/stats` - Estadísticas de subastas (Admin)
-- `GET /api/auctions/expired` - Subastas vencidas (Admin)
-- `GET /api/auctions` - Listar subastas con filtros
-- `POST /api/auctions` - Crear nueva subasta (Admin)
-- `GET /api/auctions/:id` - Detalle de subasta específica
-- `POST /api/auctions/:id/winner` - Registrar ganador (Admin)
-- `POST /api/auctions/:id/reassign-winner` - Reasignar ganador (Admin)
-- `PATCH /api/auctions/:id/status` - Cambiar estado (Admin)
-- `PATCH /api/auctions/:id/extend-deadline` - Extender plazo (Admin)
-- `DELETE /api/auctions/:id` - Eliminar subasta (Admin)
+### **SUBASTAS** (`/auctions`)
+- `GET /auctions/stats` - Estadísticas de subastas (Admin)
+- `GET /auctions/expired` - Subastas vencidas (Admin)
+- `GET /auctions` - Listar subastas con filtros
+- `POST /auctions` - Crear nueva subasta (Admin)
+- `GET /auctions/:id` - Detalle de subasta específica
+- `POST /auctions/:id/winner` - Registrar ganador (Admin)
+- `POST /auctions/:id/reassign-winner` - Reasignar ganador (Admin)
+- `PATCH /auctions/:id/status` - Cambiar estado (Admin)
+- `PATCH /auctions/:id/extend-deadline` - Extender plazo (Admin)
+- `DELETE /auctions/:id` - Eliminar subasta (Admin)
 
-### **USUARIOS** (`/api/users`)
-- `GET /api/users/:userId/won-auctions` - Subastas ganadas por cliente
-- `GET /api/users/:userId/can-participate` - Verificar elegibilidad
-- `GET /api/users/:userId/balance` - Saldo de usuario
-- `GET /api/users/:userId/movements` - Movimientos de usuario
-- `POST /api/users/:userId/movements/manual` - Movimiento manual (Admin)
-- `GET /api/users/offers/stats` - Estadísticas de ofertas (Admin)
+### **USUARIOS** (`/users`)
+- `GET /users/:userId/won-auctions` - Subastas ganadas por cliente
+- `GET /users/:userId/can-participate` - Verificar elegibilidad
+- `GET /users/:userId/balance` - Saldo de usuario
+- `GET /users/:userId/movements` - Movimientos de usuario
+- `POST /users/:userId/movements/manual` - Movimiento manual (Admin)
+- `GET /users/offers/stats` - Estadísticas de ofertas (Admin)
 
-### **PAGOS DE GARANTÍA** (`/api/guarantee-payments`)
-- `GET /api/guarantee-payments/stats` - Estadísticas de pagos (Admin)
-- `GET /api/guarantee-payments` - Listar pagos con filtros
-- `POST /api/guarantee-payments` - Registrar pago (Cliente)
-- `GET /api/guarantee-payments/:id` - Detalle de pago específico
-- `PATCH /api/guarantee-payments/:id/approve` - Aprobar pago (Admin)
-- `PATCH /api/guarantee-payments/:id/reject` - Rechazar pago (Admin)
-- `GET /api/guarantee-payments/:id/voucher` - Descargar comprobante
+### **PAGOS DE GARANTÍA** (`/guarantee-payments`)
+- `GET /guarantee-payments/stats` - Estadísticas de pagos (Admin)
+- `GET /guarantee-payments` - Listar pagos con filtros
+- `POST /guarantee-payments` - Registrar pago (Cliente)
+- `GET /guarantee-payments/:id` - Detalle de pago específico
+- `PATCH /guarantee-payments/:id/approve` - Aprobar pago (Admin)
+- `PATCH /guarantee-payments/:id/reject` - Rechazar pago (Admin)
+- `GET /guarantee-payments/:id/voucher` - Descargar comprobante
 
-### **SALDOS** (`/api/balances`)
-- `GET /api/balances/dashboard` - Resumen financiero (Admin)
-- `GET /api/balances/stats` - Estadísticas de saldos (Admin)
-- `GET /api/balances/summary` - Resumen de todos los saldos (Admin)
+### **SALDOS** (`/balances`)
+- `GET /balances/dashboard` - Resumen financiero (Admin)
+- `GET /balances/stats` - Estadísticas de saldos (Admin)
+- `GET /balances/summary` - Resumen de todos los saldos (Admin)
 
-### **JOBS** (`/api/jobs`)
-- `GET /api/jobs/status` - Estado de jobs programados (Admin)
-- `GET /api/jobs/list` - Lista de jobs disponibles (Admin)
-- `POST /api/jobs/run/:jobName` - Ejecutar job manual (Admin)
-- `POST /api/jobs/process-expired` - Procesar vencidos (Admin)
-- `GET /api/jobs/check-upcoming` - Verificar próximos vencimientos (Admin)
-- `GET /api/jobs/daily-report` - Reporte diario (Admin)
+### **JOBS** (`/jobs`)
+- `GET /jobs/status` - Estado de jobs programados (Admin)
+- `GET /jobs/list` - Lista de jobs disponibles (Admin)
+- `POST /jobs/run/:jobName` - Ejecutar job manual (Admin)
+- `POST /jobs/process-expired` - Procesar vencidos (Admin)
+- `GET /jobs/check-upcoming` - Verificar próximos vencimientos (Admin)
+- `GET /jobs/daily-report` - Reporte diario (Admin)
 
 ---
 
 ##  **CONTROL DE ACCESO**
 
 ### Admin Only (22 endpoints)
-- Todas las rutas de `/api/jobs`
-- Todas las rutas de `/api/balances`
+- Todas las rutas de `/jobs`
+- Todas las rutas de `/balances`
 - Gestión de subastas (crear, editar, eliminar)
 - Validación de pagos (aprobar/rechazar)
 - Estadísticas y reportes
 
 ### Client Only (3 endpoints)
-- `POST /api/guarantee-payments` - Registrar pago
+- `POST /guarantee-payments` - Registrar pago
 
 ### Both Admin & Client (12 endpoints)
 - Autenticación básica

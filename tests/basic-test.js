@@ -72,7 +72,7 @@ async function runBasicTests() {
   
   // 1. Health Check
   console.log('1️⃣ === HEALTH CHECK ===');
-  await makeRequest('/health');
+  await makeRequest('/');
   
   // 2. Autenticación
   const adminSession = await loginAsAdmin();

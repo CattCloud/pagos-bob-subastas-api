@@ -131,7 +131,7 @@ Tienen roles y permisos completamente diferentes:
 
 ## 4. Definición de módulos / funcionalidades
 
-### **MÓDULO 1: Gestión de Subastas (EXPANDIDO)**
+### **MÓDULO 1: Gestión de Subastas**
 
 **Rol**: Admin
 
@@ -143,7 +143,7 @@ Tienen roles y permisos completamente diferentes:
 - **NUEVO:** **Como admin**, quiero registrar el resultado de la competencia externa (ganada/perdida/penalizada) para actualizar el estado final de la subasta
 - **NUEVO:** **Como admin**, quiero gestionar las transiciones de estado de subasta según el resultado de la competencia externa
 
-### **MÓDULO 2: Gestión de Pagos de Garantía (MODIFICADO)**
+### **MÓDULO 2: Gestión de Pagos de Garantía**
 
 **Funcionalidades:**
 
@@ -153,7 +153,7 @@ Tienen roles y permisos completamente diferentes:
 - **Como admin**, quiero validar un pago de garantía (aprobar/rechazar) creando la transacción correspondiente
 - **Como admin**, quiero ver el tiempo restante para validar pagos para cumplir con los límites establecidos
 
-### **MÓDULO 3: Gestión de Saldos con Sistema de Transacciones (REDISEÑADO)**
+### **MÓDULO 3: Gestión de Saldos con Sistema de Transacciones**
 
 **Funcionalidades:**
 
@@ -162,7 +162,7 @@ Tienen roles y permisos completamente diferentes:
 - **Como admin**, quiero consultar el saldo de cualquier cliente calculado desde sus transacciones para resolver consultas
 - **Como admin**, quiero ver un resumen de todos los saldos para control financiero general
 
-### **MÓDULO 4: Sistema de Transacciones (NUEVO)**
+### **MÓDULO 4: Sistema de Transacciones**
 
 **Funcionalidades:**
 
@@ -172,7 +172,7 @@ Tienen roles y permisos completamente diferentes:
 - **Como admin**, quiero ver el historial de transacciones de cualquier cliente para soporte y auditoría
 - **Como admin**, quiero crear transacciones manuales para ajustes o correcciones
 
-### **MÓDULO 5: Gestión de Facturación (NUEVO)**
+### **MÓDULO 5: Gestión de Facturación**
 
 **Funcionalidades:**
 
@@ -180,7 +180,7 @@ Tienen roles y permisos completamente diferentes:
 - **Como admin**, quiero gestionar la información de facturación de las ventas completadas
 - **Como sistema**, quiero calcular el saldo aplicado desde las facturas generadas
 
-### **MÓDULO 6: Gestión de Reembolsos y Penalidades (EXPANDIDO)**
+### **MÓDULO 6: Gestión de Reembolsos y Penalidades**
 
 **Funcionalidades:**
 
@@ -192,7 +192,7 @@ Tienen roles y permisos completamente diferentes:
 
 ---
 
-## 5. Reglas de negocio (ACTUALIZADAS)
+## 5. Reglas de negocio 
 
 ### **REGLAS DEL PROCESO COMPLETO:**
 
@@ -200,8 +200,8 @@ Tienen roles y permisos completamente diferentes:
 
 1. Cliente gana subasta BOB → registra pago de garantía (8%)
 2. Admin valida pago de garantía → dinero queda retenido
-3. **NUEVO:** BOB participa en competencia externa contra otras empresas
-4. **NUEVO:** Según resultado de competencia:
+3. BOB participa en competencia externa contra otras empresas
+4. Según resultado de competencia:
    - **BOB gana:** Se factura al cliente, saldo se aplica
    - **BOB pierde:** Se reembolsa completamente al cliente
    - **BOB gana pero cliente no paga:** 30% penalidad, 70% reembolso
@@ -213,13 +213,13 @@ Tienen roles y permisos completamente diferentes:
 - El pago de garantía DEBE ser exactamente el 8% del monto de la oferta ganadora
 - Si el monto ingresado no coincide con el 8%, el sistema DEBE rechazar el pago
 
-**RN03 - Registro como Transacción:**
+**RN03 - Registro como Movimiento(Transacción):**
 
 - Cuando el cliente registra su pago, se crea transacción tipo `pago_garantia`
 - Cuando se valida, se actualiza automáticamente cache de saldo en User
 - Solo movimientos validados afectan los cálculos de saldo
 
-### **REGLAS DE TRANSACCIONES (NUEVO):**
+### **REGLAS DE TRANSACCIONES(Movimientos):**
 
 **RN04 - Sistema de Transacciones:**
 
@@ -239,13 +239,17 @@ Donde:
 - Saldo Aplicado = Suma de registros en Billing (ventas completadas)
 ```
 
-### **REGLAS DE ESTADOS DE SUBASTA (EXPANDIDAS):**
+### **REGLAS DE ESTADOS DE SUBASTA:**
 
 **RN06 - Estados y Transiciones:**
 
-Estados existentes: `activa`, `pendiente`, `en_validacion`, `finalizada`, `vencida`, `cancelada`
-
-**NUEVOS Estados:**
+Los estados de subasta siguen este flujo:
+- `activa` → Subasta creada, sin ganador asignado
+- `pendiente` → Ganador asignado, esperando que registre pago
+- `en_validacion` → Cliente registró pago, admin debe validar
+- `finalizada` → Pago validado y completado
+- `vencida` → Tiempo límite agotado, ganador no pagó
+- `cancelada` → Cancelada manualmente por admin
 - `ganada`: BOB ganó competencia externa → crear Billing
 - `perdida`: BOB perdió competencia externa → procesar reembolso
 - `penalizada`: BOB ganó pero cliente no pagó → aplicar penalidad + reembolso parcial
@@ -255,7 +259,17 @@ Estados existentes: `activa`, `pendiente`, `en_validacion`, `finalizada`, `venci
 - `finalizada`: Dinero SE retiene (BOB aún no compite)
 - `ganada`, `perdida`, `penalizada`: Dinero NO se retiene (proceso resuelto)
 
-### **REGLAS DE PENALIDADES (CORREGIDAS):**
+**RN - Reasignación de Ganador:**
+
+Cuando el ganador original no realiza el pago antes del límite:
+
+1. La subasta pasa a `vencida` temporalmente
+2. **Reasignación**: Se registra la siguiente mejor oferta
+3. **Reactivación**: Se puede establecer nueva fecha límite o manejo manual
+4. **Notificación**: Se informa al nuevo ganador 
+
+
+### **REGLAS DE PENALIDADES:**
 
 **RN08 - Aplicación de Penalidad:**
 
@@ -264,7 +278,7 @@ Estados existentes: `activa`, `pendiente`, `en_validacion`, `finalizada`, `venci
 - Reembolso parcial = 70% del monto de garantía pagado
 - Se crean dos transacciones: una de penalidad (salida) y una de reembolso (salida)
 
-### **REGLAS DE FACTURACIÓN (NUEVO):**
+### **REGLAS DE FACTURACIÓN:**
 
 **RN09 - Generación de Facturas:**
 
@@ -286,18 +300,34 @@ Estados existentes: `activa`, `pendiente`, `en_validacion`, `finalizada`, `venci
 - No permitir transacciones que generen inconsistencias
 - Validar integridad entre Movement, Billing y estados de Auction
 
+### **REGLAS DE REEMBOLSOS:**
+
+**RN12 - Solicitud de Reembolso:**
+
+- Un cliente puede solicitar reembolso de saldo disponible cualquier día
+- La empresa DEBE confirmar con el cliente: mantener como saldo o devolver dinero
+
+**RN13 - Procesamiento:**
+
+- Los reembolsos pueden procesarse cualquier día de la semana
+- Una vez procesado, NO se puede revertir
+
+**RN14 - Diferenciación por Rutas:**
+
+- Admin: acceso SOLO por `/admin-subastas`
+- Cliente: acceso SOLO por `/pago-subastas`
+- Sin autenticación tradicional
+
+**RN15 - Identificación de Usuarios:**
+
+- En `/pago-subastas`: cliente selecciona tipo de documento e ingresa número para acceder
+- En `/admin-subastas`: acceso automático con datos del admin registrado
+- Si un documento no existe, DEBE mostrar error y no permitir acceso
+
 ---
 
 ## 6. Datos y base de datos (nivel conceptual)
-
-### **ENTIDADES ELIMINADAS**
-
-- ❌ **`User_Balance`** - Reemplazada por cálculos desde `Movement`
-- ❌ **`Guarantee_Payment`** - Funcionalidad absorbida por `Movement`
-
-### **ENTIDADES MODIFICADAS**
-
-### **ENTIDAD 1: User (MODIFICADO)**
+### **ENTIDAD 1: User**
 
 **Representa:** Usuarios del sistema (clientes y admin)
 
@@ -311,15 +341,24 @@ Estados existentes: `activa`, `pendiente`, `en_validacion`, `finalizada`, `venci
 - document_type (nullable para admin)
 - document_number* (ÚNICO - para identificación de clientes)
 - user_type* (admin/client)
-- **NUEVO:** saldo_total (cache calculado desde Movement)
-- **NUEVO:** saldo_retenido (cache calculado según estados)
+- saldo_total (cache calculado desde Movement)
+- saldo_retenido (cache calculado según estados)
 - created_at
 - updated_at
 - deleted_at
 
-### **ENTIDAD 2: Auction (MODIFICADO)**
+### **ENTIDAD 2: Auction **
 
-**Representa**: Subastas con proceso completo incluyendo competencia externa
+**Representa**: Subastas que **YA terminaron** (tiempo agotado) pero pueden tener diferentes estados:
+- `activa`: Se registro la subasta pero aun no se registra un ganador
+- `finalizada`: Hay ganador ,el cliente pagó y se valido
+- `pendiente`: Ganador aun no pagó, posible pasó al siguiente
+- `en_validacion` : Después de que el cliente registra pago, pero aún no está validado
+- `cancelada`: Se canceló por algún motivo
+- `vencida`: El ganador no pago en la fecha limite de pago
+- `ganada`: BOB ganó contra competidores en subasta general
+- `perdida`: BOB perdió contra competidores → proceder con reembolso
+- `penalizada`: BOB ganó pero cliente no completó pago → aplicar penalidad 30%
 
 **Atributos:**
 
@@ -330,12 +369,10 @@ Estados existentes: `activa`, `pendiente`, `en_validacion`, `finalizada`, `venci
 - fecha_limite_pago (Momento exacto hasta el cual el ganador puede pagar)
 - estado (activa, pendiente, en_validacion, finalizada, **ganada**, **perdida**, **penalizada**, vencida, cancelada)
 - id_offerWin (es el id de la oferta que gano)
-- **NUEVO:** fecha_resultado_general (cuándo se resolvió competencia externa)
+- fecha_resultado_general (cuándo se resolvió competencia externa)
 - finished_at (Cuando ya paso la subasta a finalizado y se tiene un ganador establecido)
 - created_at
 - updated_at
-
-### **ENTIDADES NUEVAS**
 
 ### **ENTIDAD 3: Movement (TRANSACCIONES PRINCIPALES)**
 
@@ -391,11 +428,75 @@ Estados existentes: `activa`, `pendiente`, `en_validacion`, `finalizada`, `venci
 - created_at DATETIME
 - updated_at DATETIME
 
-### **ENTIDADES EXISTENTES (SIN CAMBIOS)**
 
-- **Asset (Activos)** - Sin cambios
-- **Offer (Ofertas)** - Sin cambios
-- **Refund (Reembolsos)** - Sin cambios
+### **ENTIDAD 5: Offer(Ofertas)**
+
+**Representa: Ofertas relevantes realizadas en una subasta**, no solo la ganadora hasta el ranking 3.
+
+**Atributos:**
+
+- id (PK)
+- auction_id (FK)* (Subasta en la que participa)
+- user_id (FK)* (Usuario que hizo la oferta)
+- monto_oferta* (Valor ofertado)
+- fecha_oferta*
+- posicion_ranking (1=ganador, 2=segundo, etc.)
+- fecha_asignacion_ganador (Fecha/hora en que esta oferta fue declarada ganadora)
+- estado (activa/ganadora/perdedora)
+
+| Estado      | Significado                                                | Acciones que lo llevan a este estado                                         |
+| ----------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `activa`    | Ganador preliminar asignado, pendiente de pago de garantía | Admin registra ganador y se crea offer con estado `activa`                   |
+| `ganadora`  | Oferta confirmada, garantía pagada y validada              | Cuando el pago de garantía se confirma                                       |
+| `perdedora` | Oferta descartada, ya no es candidata                      | Cuando se reasigna el ganador a otro usuario o la subasta se cierra sin pago |
+
+
+
+### **ENTIDAD 6: Asset (Activos)**
+
+**Representa:** Información del vehículo físico (placa, empresa, etc.)
+
+**Atributos:**
+
+- id (PK)
+- placa*
+- empresa_propietaria*
+- marca
+- modelo
+- año
+- estado(`disponible`, `vendido`, `retirado`)
+- descripcion
+- created_at
+- updated_at
+
+
+### **ENTIDAD 7: Refund (Reembolsos)**
+
+**Representa:** Solicitudes de reembolso
+
+**Atributos:**
+
+- id (PK)
+- user_id (FK)*
+- monto_solicitado*
+- tipo_reembolso* (mantener_saldo/devolver_dinero)
+- estado
+- fecha_solicitud
+- fecha_respuesta_empresa (cuando la solicitud pasa a confirmado o rechazada)
+- fecha_procesamiento (cuando admin procesa)
+- motivo
+- created_at
+- updated_at
+
+<aside>
+
+Estados de solicitud de reembolso
+- `solicitado` → Cliente hizo la solicitud
+- `confirmado` → Empresa llamó y cliente confirmó el tipo
+- `rechazado` → El admin revisó la solicitud y decidió no aprobarla
+- `procesado` → Admin completó el reembolso
+- `cancelado` → Cliente canceló la solicitud
+
 
 ---
 
@@ -418,14 +519,14 @@ Estados existentes: `activa`, `pendiente`, `en_validacion`, `finalizada`, `venci
 -  **Mis Garantías** (pantalla principal)
 -  **Pagar Garantía**
 -  **Mi Saldo** (calculado desde transacciones)
--  **Historial de Transacciones** (nuevo nombre)
+-  **Historial de Transacciones**
 -  **Solicitar Reembolso**
 
 ### **ADMIN - Menú Lateral:**
 -  **Pagos de Garantía** (pantalla principal)
--  **Gestión de Subastas** (expandido con nuevos estados)
+-  **Gestión de Subastas** 
 -  **Nueva Subasta**
--  **Resultados de Competencia** (nuevo)
+-  **Resultados de Competencia** 
 -  **Gestión de Saldos** (con sistema de transacciones)
--  **Gestión de Facturación** (nuevo)
+-  **Gestión de Facturación** 
 -  **Gestión de Reembolsos**

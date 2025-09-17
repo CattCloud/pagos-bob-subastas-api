@@ -428,7 +428,7 @@ Cuando el ganador original no realiza el pago antes del límite:
 - estado ENUM('pendiente', 'validado', 'rechazado')
 - fecha_pago DATETIME NULL
 - fecha_resolucion DATETIME NULL
-- motivo_rechazo TEXT NULL
+- motivo TEXT NULL
 - numero_operacion VARCHAR(100) NULL
 - created_at DATETIME
 - updated_at DATETIME

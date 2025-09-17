@@ -37,9 +37,10 @@ Como **administrador**, quiero ver el historial completo de pagos de garantía r
 
 ### **Validaciones de Negocio**
 
-- **VN-01:** Mostrar todos los `Guarantee_Payment`, independientemente de su estado.
+- **VN-01:** Mostrar todos los `Movement` tipo `pago_garantia`, independientemente de su estado.
 - **VN-02:** Resaltar los que tienen `estado = pendiente` para priorizar su atención.
 - **VN-03:** Excluir pagos de subastas canceladas o vencidas.
+- **VN-04:** Cargar información de subasta y cliente mediante `Movement_References`.
 - **VN-04:** Actualizar datos y contadores automáticamente cada 5 min.
 
 ---
@@ -88,35 +89,39 @@ Como administrador, quiero ver todos los detalles de un pago de garantía espec�
     
     **Datos de la Subasta:**
     
-    - Información del vehículo (marca, modelo, año, placa)
+    - Información del vehículo (marca, modelo, año, placa) - desde Movement_References
     - Estado actual de la subasta
     - Monto de la oferta ganadora
-    - Monto de garantía calculado (8%)
+    - Monto de garantía esperado (8%)
     
     **Datos del Cliente:**
     
     - Nombre completo
     - Tipo y número de documento
     - Teléfono de contacto
-    - Saldo actual del cliente
+    - Saldo total y saldo retenido (cache automático desde User)
     
-    **Detalles del Pago:**
+    **Detalles del Pago (desde Movement):**
     
     - Monto registrado por el cliente
     - Tipo de pago (Depósito / Transferencia)
     - Número de cuenta origen
+    - Número de operación bancaria
     - Fecha de pago declarada
     - Fecha de registro en el sistema
-    - Comentarios del cliente (si los hay)
+    - Concepto del pago (si hay)
+    - Moneda (USD)
     - **Estado actual del pago** (Pendiente | Validado | Rechazado)
 - **CA-02:** Visualizador de comprobante:
     - Si es imagen: mostrar preview ampliable
     - Si es PDF: mostrar enlace para descargar/abrir
     - Botón para descargar archivo original
 - **CA-03:** Validaciones automáticas visibles (solo en estado Pendiente):
-    - ✅/❌ Monto coincide con el 8% exacto
+    - ✅/❌ Monto coincide con el 8% exacto de la oferta ganadora
     - ✅/❌ Fecha de pago está en rango válido
-    - ✅/❌ Número de cuenta tiene formato válido
+    - ✅/❌ Número de cuenta origen tiene formato válido
+    - ✅/❌ Número de operación es válido y único para el cliente
+    - ✅/❌ Archivo de comprobante está accesible en Cloudinary
     - ⚠️ Advertencias si algo requiere atención
 
 ### **Diferencias por Estado**
@@ -184,20 +189,21 @@ Como administrador, quiero aprobar un pago de garantía válido para actualizar 
     - Impacto en el saldo del cliente
     - Confirmación de datos críticos (monto, cliente, subasta)
 - **CA-02:** Al confirmar aprobación:
-    - Actualizar `Guarantee_Payment.estado = validado`
-    - Registrar `fecha_resolucion = now()`
-    - Actualizar saldo del cliente:
-        - `User_Balance.saldo_retenido -= monto_garantia`
-        - `User_Balance.saldo_aplicado += monto_garantia`
-    - Crear `Movement` tipo `garantia_validada`
+    - Actualizar `Movement.estado = validado`
+    - Registrar `Movement.fecha_resolucion = now()`
+    - Cache de saldo se actualiza INMEDIATAMENTE vía lógica de aplicación:
+        - Backend ejecuta función para recalcular `User.saldo_total` y `User.saldo_retenido`
     - Actualizar estado de la subasta a `finalizada`
+    - Crear notificación automática para el cliente:
+        - Tipo `pago_validado` en UI + correo vía EmailJS
 
 ### **Validaciones de Negocio**
 
-- **VN-01:** Verificar que el pago sigue `pendiente` (no fue procesado por otro admin)
-- **VN-02:** Confirmar que la subasta sigue en estado válido para recibir pagos
+- **VN-01:** Verificar que el Movement sigue `pendiente` (no fue procesado por otro admin)
+- **VN-02:** Confirmar que la subasta sigue en estado `en_validacion`
 - **VN-03:** Validar que el cliente existe y está activo
-- **VN-04:** Verificar integridad de los cálculos de saldo
+- **VN-04:** Verificar que el monto coincide con el 8% esperado
+- **VN-05:** Confirmar que no existe otro Movement validado para la misma subasta
 
 ### **UI/UX**
 
@@ -240,20 +246,22 @@ Como administrador, quiero rechazar un pago de garantía inválido especificando
     - Campo obligatorio para "Otros motivos" (texto libre)
     - Campo opcional para comentarios adicionales
 - **CA-02:** Al confirmar rechazo:
-    - Actualizar `Guarantee_Payment.estado = rechazado`
-    - Registrar `fecha_resolucion = now()`
-    - Guardar motivos seleccionados
-    - Crear `Movement` tipo `garantia_rechazada`
-    - Actualizar estado de la subasta a `pendiente`
-    - Revertir saldo del cliente:
-        - `User_Balance.saldo_retenido -= monto_garantia` (NO tocar saldo_total - se mantiene para historial)
+    - Actualizar `Movement.estado = rechazado`
+    - Registrar `Movement.fecha_resolucion = now()`
+    - Guardar motivos en `Movement.motivo`
+    - Actualizar estado de la subasta a `pendiente` (para permitir nuevo pago)
+    - Cache de saldo se actualiza INMEDIATAMENTE vía lógica de aplicación:
+        - Backend ejecuta función para recalcular `User.saldo_total` y `User.saldo_retenido`
+    - Crear notificación automática para el cliente:
+        - Tipo `pago_rechazado` en UI + correo vía EmailJS con motivos específicos
 
 ### **Validaciones de Negocio**
 
 - **VN-01:** Al menos un motivo debe ser seleccionado
 - **VN-02:** Si selecciona "Otros", el campo de texto es obligatorio
-- **VN-03:** Verificar que el pago sigue `pendiente`
+- **VN-03:** Verificar que el Movement sigue `pendiente`
 - **VN-04:** No permitir rechazo si la subasta ya venció o fue cancelada
+- **VN-05:** El texto del motivo_rechazo no debe exceder 1000 caracteres
 
 ### **UI/UX**
 
@@ -283,7 +291,7 @@ Como administrador, quiero marcar un pago de garantía como vencido para aplicar
 ### **Condiciones Funcionales**
 
 - **CA-01:** Acceso desde:
-    - **HU-SUB-07** (Detalle de Subasta) → botón **"Marcar como Vencido"** disponible únicamente para subastas con estado `pendiente`.
+    - **HU-SUB-04** (Detalle de Subasta) → botón **"Marcar como Vencido"** disponible únicamente para subastas con estado `pendiente`.
     - Modal de confirmación que muestra:
         - Información de la subasta y ganador actual.
         - Monto de penalidad que se aplicará.
@@ -299,29 +307,29 @@ Como administrador, quiero marcar un pago de garantía como vencido para aplicar
 - **CA-04:** Al confirmar vencimiento:
     - Cambiar `Auction.estado = vencida`.
     - Cambiar `Offer.estado = perdedora`.
-    - Aplicar penalidad: `min(saldo_disponible, monto_garantia * 0.30)`.
-    - Actualizar `User_Balance.saldo_penalizado += monto_penalidad`.
-    - Crear `Movement` tipo `penalidad`.
-    - Registrar motivo del vencimiento.
+    - Registrar motivo del vencimiento en `Movement.motivo`.
+    - NO SE APLICA PENALIDAD en esta etapa (la penalidad es solo cuando BOB gana y cliente no completa pago del vehículo)
+    - Crear notificación automática al cliente 
+      - Tipo `pago_vencido` en UI + correo vía EmailJS con motivos específicos   
 
 ### **Validaciones de Negocio**
 
 - **VN-01:** Solo aplicar si subasta está en estado `pendiente`.
 - **VN-02:** Verificar que existe `id_offerWin` (ganador asignado).
-- **VN-03:** Si no tiene saldo disponible, registrar penalidad como \$0 pero mantener el registro del intento.
+- **VN-03:** NOTA: No se aplica penalidad financiera - solo se marca como vencida para permitir reasignación.
 
 ### **UI/UX**
 
 - **UX-01:** Modal de confirmación con advertencia clara:
     
-    > "Esta acción aplicará una penalidad de \$X al cliente \[nombre] y marcará la subasta como vencida. ¿Está seguro?"
-    > 
-- **UX-03:** Mostrar cálculo de penalidad en tiempo real.
+    > "Esta acción marcará la subasta como vencida debido a que el cliente [nombre] no registró su pago de garantía a tiempo. ¿Está seguro?"
+    >
+- **UX-03:** Mostrar motivo del vencimiento claramente.
 - **UX-04:** Botón de confirmación en rojo con texto **"Marcar como Vencido"**.
 
 ### **Estados y Flujo**
 
-- **EF-01:** Tras marcar como vencido, regresar a **HU-SUB-07** con estado actualizado.
+- **EF-01:** Tras marcar como vencido, regresar a **HU-SUB-04** con estado actualizado.
 - **EF-02:** Mostrar toast de confirmación con link a **"Reasignar Ganador"**.
 - **EF-03:** Los vencimientos automáticos generan notificación diaria al admin.
 
@@ -339,7 +347,7 @@ Como administrador, quiero extender el plazo de pago de una garantía para dar m
 
 ### **Condiciones Funcionales**
 
-- **CA-01:** Acceso desde **HU-SUB-07** → botón "Extender Plazo de Pago"
+- **CA-01:** Acceso desde **HU-SUB-04(Detalle de Subasta)**  → botón "Extender Plazo de Pago"
 - **CA-02:** Modal con:
     - Fecha límite actual (si existe)
     - Nueva fecha límite (datetime picker) *obligatorio*
@@ -362,7 +370,7 @@ Como administrador, quiero extender el plazo de pago de una garantía para dar m
 
 ### **Estados y Flujo**
 
-- **EF-01:** Tras extender, regresar a **HU-SUB-07** con fecha actualizada
+- **EF-01:** Tras extender, regresar a **HU-SUB-04** con fecha actualizada
 - **EF-02:** Mostrar toast confirmando la extensión
 
 ---

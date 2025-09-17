@@ -18,7 +18,7 @@ Como cliente identificado, quiero ver y confirmar mis datos personales antes de 
     - Nombre completo (`first_name + last_name`)
     - Tipo y número de documento
     - Teléfono de contacto
-    - Saldo disponible actual
+    - Saldo disponible actual (calculado desde Movement: Total - Retenido - Aplicado)
 - **CA-02:** Datos deben mostrarse en modo solo lectura
 - **CA-03:** Incluir botón "Confirmar y Continuar" para avanzar al paso 2
 - **CA-04:** Incluir enlace "¿Los datos son incorrectos?" que muestre información de contacto para editar
@@ -73,7 +73,7 @@ Como cliente, quiero seleccionar la subasta específica por la cual realizaré e
 
 ### **Validaciones de Negocio:**
 
-- **CA-05:** Solo mostrar subastas donde no existe `Guarantee_Payment` con `estado != rechazado`
+- **CA-05:** Solo mostrar subastas donde no existe `Movement` tipo `pago_garantia` con `estado = validado` para esa subasta
 - **CA-06:** Verificar que la subasta sigue en estado válido para recibir pagos
 - **CA-07:** Recalcular monto de garantía en tiempo real (oferta * 0.08)
 
@@ -119,27 +119,31 @@ Como cliente, quiero registrar los detalles de mi depósito o transferencia banc
     - Código interbancario
     - Instrucciones de pago (ej. “Usar número de subasta como referencia”)
 - **CA-03:** Formulario con campos obligatorios:
+    - `monto` (decimal) *obligatorio* 
+    - `moneda` (select): USD por defecto *obligatorio* (Solo USD por ahora)
     - `tipo_pago` (radio o select): **Depósito** | **Transferencia Bancaria** *obligatorio*
     - `numero_cuenta_origen` (texto) *obligatorio*
+    - `numero_operacion` (texto) - Número de referencia de la operación bancaria *obligatorio*
     - `fecha_pago` (date) *obligatorio*
     - `voucher_url` (file upload) *obligatorio*
-    - `comentarios` (texto opcional)
-- **CA-04:** Sección de datos de facturación:
-    - `billing_document_type` (RUC/DNI) *obligatorio*
-    - `billing_name` (texto) *obligatorio*
+    - `concepto` (texto opcional) - Descripción del pago
+- **CA-04:** NOTA: Los datos de facturación se solicitarán cuando se aplique el saldo (no durante el registro del pago)
 
 ---
 
 ### **Validaciones de Negocio:**
 
-- **CA-05:** `numero_cuenta_origen` debe tener formato válido (10-20 dígitos)
-- **CA-06:** `fecha_pago` no puede ser futura ni anterior a fecha inicio de subasta
-- **CA-07:** Archivo de comprobante:
+- **CA-05:** `monto` debe coincidir exactamente con el 8% de la oferta ganadora (máximo 2 decimales)
+- **CA-06:** `monto` debe ser mayor a 0 y menor a $999,999.99
+- **CA-07:** `numero_cuenta_origen` debe tener formato válido (10-20 dígitos)
+- **CA-08:** `numero_operacion` debe ser alfanumérico, entre 3-100 caracteres
+- **CA-09:** `fecha_pago` no puede ser futura ni anterior a fecha inicio de subasta
+- **CA-10:** Archivo de comprobante:
     - Formatos: PDF, JPG, PNG
     - Tamaño máximo: 5MB
     - Nombre debe ser descriptivo
-- **CA-08:** `billing_name` debe tener entre 3-100 caracteres
-- **CA-09:** No permitir duplicar número de cuenta para la misma subasta
+- **CA-11:** `concepto` máximo 500 caracteres
+- **CA-12:** No permitir duplicar `numero_operacion` para el mismo cliente
 
 ---
 
@@ -150,7 +154,8 @@ Como cliente, quiero registrar los detalles de mi depósito o transferencia banc
 - **CA-12:** Campo de `tipo_pago` visible y claro (radio button / select)
 - **CA-13:** Upload de comprobante con drag & drop
 - **CA-14:** Preview del monto exacto a transferir destacado visualmente
-- **CA-15:** Tooltip en billing data: "Para emisión de comprobante de pago"
+- **CA-15:** Campo `monto` debe mostrar el monto exacto requerido como referencia: "Debe ingresar exactamente $XXX.XX (8% de su oferta)"
+- **CA-16:** Campo `numero_operacion` con tooltip: "Número de referencia bancaria de su transferencia/depósito"
 
 ---
 
@@ -176,25 +181,39 @@ Como cliente, quiero revisar toda la información antes de confirmar el registro
 - **CA-01:** Mostrar resumen completo para confirmación:
     - **Datos del Cliente**: nombre, documento
     - **Subasta**: vehículo, placa, monto oferta
-    - **Pago**: monto garantía, cuenta origen, fecha, comprobante
-    - **Facturación**: tipo documento, nombre/razón social
-- **CA-02:** Al confirmar, crear registro en `Guarantee_Payment`:
-    - Todos los datos del formulario
-    - `estado = pendiente`
-    - `created_at = now()`
--**CA-03:** Actualizar User_Balance:
-    - saldo_total += monto_garantia
-    - saldo_retenido += monto_garantia
-- **CA-03:** Actualizar `User_Balance.saldo_retenido += monto_garantia`
-- **CA-04:** Crear registro en `Movement` tipo `retencion`
-- CA-05 : Actualizar el estado de la subasta relacionada `Auction.estado=en_validacion`
+    - **Pago**: monto ingresado, monto garantía esperado (8%), cuenta origen, número operación, fecha, comprobante, moneda
+- **CA-02:** Al confirmar, crear registro en `Movement`:
+    - `user_id` = cliente actual
+    - `tipo_movimiento_general` = 'entrada'
+    - `tipo_movimiento_especifico` = 'pago_garantia'
+    - `monto` = monto ingresado por el cliente
+    - `moneda` = moneda seleccionada
+    - `tipo_pago` = tipo seleccionado
+    - `numero_cuenta_origen` = cuenta ingresada
+    - `numero_operacion` = número ingresado
+    - `voucher_url` = archivo subido
+    - `concepto` = concepto ingresado
+    - `estado` = 'pendiente'
+    - `fecha_pago` = fecha ingresada
+    - `created_at` = now()
+- **CA-03:** Crear registros en `Movement_References`:
+    - Referencia a `Auction`: `reference_type = 'auction'`, `reference_id = auction_id`
+    - Referencia a `Offer`: `reference_type = 'offer'`, `reference_id = offer_id`
+- **CA-04:** Actualizar estado de la subasta: `Auction.estado = 'en_validacion'`
+- **CA-05:** Actualizar cache automático en `User`:
+    - Backend ejecuta función para recalcular `saldo_total` y `saldo_retenido` INMEDIATAMENTE
+- **CA-06:** Crear notificación automática:
+    - **Para cliente**: tipo `pago_registrado` en UI
+    - **Para admin**: tipo `pago_registrado` en UI + correo automático vía EmailJS
 
 ### **Validaciones de Negocio:**
 
-- **CA-05:** Validación final: verificar que subasta sigue disponible para pago
-- **CA-06:** Verificar que no se duplicó el registro durante el proceso
-- **CA-07:** Confirmar que archivo de comprobante se guardó correctamente
-- **CA-08:** Validar integridad de todos los datos antes de crear registros
+- **CA-07:** Validación final: verificar que `monto` ingresado coincida exactamente con el 8% de la oferta
+- **CA-08:** Verificar que subasta sigue disponible para pago
+- **CA-09:** Verificar que no se duplicó el `numero_operacion` para este cliente
+- **CA-10:** Confirmar que archivo de comprobante se guardó correctamente en Cloudinary
+- **CA-11:** Validar integridad de todos los datos antes de crear registros
+- **CA-12:** Verificar que no existe Movement pendiente para la misma subasta del cliente
 
 ### **UI/UX:**
 
@@ -238,9 +257,10 @@ Como cliente, quiero recibir confirmación de que mi pago fue registrado correct
 
 ### **Validaciones de Negocio:**
 
-- **CA-04:** Verificar que el registro se guardó correctamente
-- **CA-05:** Confirmar que los movimientos de saldo se aplicaron
-- **CA-06:** Validar que el estado de la subasta se mantiene correctamente
+- **CA-04:** Verificar que el registro `Movement` se creó correctamente
+- **CA-05:** Confirmar que las referencias `Movement_References` se crearon
+- **CA-06:** Validar que el cache de saldo se actualizó automáticamente
+- **CA-07:** Confirmar que notificaciones se enviaron (UI + correo para admin)
 
 ### **UI/UX:**
 
@@ -341,7 +361,7 @@ Como cliente, quiero ver un listado de todos mis pagos de garantía realizados p
     - **Tipo de pago**
     - **Estado** (Pendiente, Confirmado, Rechazado)
 - **CA-02:** Orden por defecto: fecha de registro **descendente** (últimos pagos primero).
-- **CA-03:** Al hacer clic en una fila (o tarjeta en mobile), redirigir a **HU-PAG-07 Seguimiento de Pago** con `id_pago` correspondiente.
+- **CA-03:** Al hacer clic en una fila (o tarjeta en mobile), redirigir a **HU-PAG-06 Seguimiento de Pago** con `id` del movimiento correspondiente.
 - **CA-04:** Debe ser responsive:
     - **Desktop:** tabla con columnas alineadas.
     - **Mobile:** tarjetas apiladas, cada tarjeta mostrando:

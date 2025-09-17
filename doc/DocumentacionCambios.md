@@ -428,11 +428,12 @@ Se crea manualmente cuando el admin maneja el estado "ganada" de una subasta.
 
 ### ESTRATEGIA COMBINADA:
 
-1. TIEMPO REAL - Para operaciones críticas:
+1. TIEMPO REAL - Lógica de Aplicación (Para operaciones críticas):
 
-- Crear/actualizar Movement → recalcular cache INMEDIATAMENTE
-- Cambiar estado Auction → recalcular saldo_retenido INMEDIATAMENTE
-- Crear Billing → NO tocar cache
+Cuando se crea/actualiza Movement: El backend ejecuta función para recalcular y actualizar User.saldo_total INMEDIATAMENTE
+Cuando cambia estado de Auction: El backend ejecuta función para recalcular y actualizar User.saldo_retenido INMEDIATAMENTE
+Cuando se crea Billing: NO ejecutar cálculos de cache (Billing no afecta Movement)
+Implementación: Funciones del backend que se llaman explícitamente después de cada operación crítica
 
 2. VALIDACIÓN NOCTURNA (Opción C) - Detecta y corrige errores de sistema
 

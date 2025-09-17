@@ -81,9 +81,10 @@ Como **administrador**, quiero ver una lista general de todas las subastas para 
 - **CA-01:** Debe mostrar tabla con columnas:
     - **Vehículo** → `marca + modelo + año` (desde `Asset`)
     - **Placa** (desde `Asset`)
-    - **Estado** (`activa`, `pendiente`, `finalizada`, `cancelada`, `vencida`,`en_validacion`)
+    - **Estado** (`activa`, `pendiente`, `finalizada`, `cancelada`, `vencida`, `en_validacion`, `ganada`, `perdida`, `penalizada`)
     - **Fecha Inicio** – **Fecha Fin**
-    - **Ganador** (nombre del cliente, solo si `id_offerWin` existe, badge descriptivo “no definido” si no tiene)
+    - **Ganador** (nombre del cliente, solo si `id_offerWin` existe, badge descriptivo "no definido" si no tiene)
+    - **Resultado BOB** (solo para estados `ganada/perdida/penalizada`)
     - Al **hacer clic en una fila** de la tabla (o tarjeta en mobile), el sistema debe mandar a Pagina de Detalle de la Subasta
 - **CA-02:** Máximo **20 registros por página** con paginación
 - **CA-03:** Filtro por estado de subasta (multi-select: activa, pendiente, finalizada, etc.)
@@ -102,10 +103,13 @@ Como **administrador**, quiero ver una lista general de todas las subastas para 
 - **CA-07:** Estados deben tener colores distintivos:
     - `activa`: verde
     - `pendiente`: amarillo
-    - `en_validacion` : celeste
+    - `en_validacion`: celeste
     - `finalizada`: azul
     - `vencida`: naranja
     - `cancelada`: rojo
+    - `ganada`: verde oscuro
+    - `perdida`: gris
+    - `penalizada`: rojo oscuro
 - **CA-08:** Botón **"Nueva Subasta"** debe estar visible y destacado
 - **CA-09:** Si no hay subastas, mostrar mensaje:
     
@@ -115,7 +119,7 @@ Como **administrador**, quiero ver una lista general de todas las subastas para 
 
 ### **Estados y Flujo**
 
-- **CA-11:** Click en fila → abrir **HU-SUB-07** (Detalle de Subasta)
+- **CA-11:** Click en fila → abrir **HU-SUB-04** (Detalle de Subasta)
 - **CA-12:** Actualización automática de la lista cada 5 minutos
 
 ---
@@ -148,8 +152,9 @@ Como administrador, quiero asignar el ganador preliminar de una subasta finaliza
         - `estado = pendiente`
         - `fecha_limite_pago = valor ingresado` (si se definió)
     - Calcular `monto_garantia = monto_oferta * 0.08`
-    - Crear/actualizar `User_Balance` y sumar `saldo_retenido += monto_garantia`
-    - Crear `Movement` tipo `retencion`
+    - Cache de saldo se actualiza automáticamente cuando el cliente registre su pago de garantía
+    - NO crear Movement aquí - se crea cuando cliente registra pago
+    - Crear notificación automática al cliente ganador tipo `ganador_subasta`
 
 ---
 
@@ -188,7 +193,7 @@ Al asignar ganador, el **detalle de la subasta** debe mostrar sección de **Gana
 - **Monto de garantía (8%)**
 - **Fecha límite de pago** (si existe)
 - **Tiempo restante** → badge de alerta si quedan <2h
-- **Botón “Reasignar ganador”** → visible solo si la subasta está en `vencida` , funcionalidad vista en **HU-SUB-04 — Reasignar Ganador de Subasta**
+- **Botón “Reasignar ganador”** → visible solo si la subasta está en `vencida` , funcionalidad vista en **HU-SUB-06 — Reasignar Ganador de Subasta**
 
 ---
 
@@ -197,11 +202,11 @@ Al asignar ganador, el **detalle de la subasta** debe mostrar sección de **Gana
 - Estado inicial de `Offer`: `activa`
 - Estado de `Auction`: pasa de `activa` → `pendiente`
 - Si paga en plazo → Offer → `ganadora`, Auction → `finalizada`
-- Si no paga en plazo → Offer → `perdedora`, Auction → `vencida`, habilita **HU-SUB-04 — Reasignar Ganador de Subasta**.
+- Si no paga en plazo → Offer → `perdedora`, Auction → `vencida`, habilita **HU-SUB-06 — Reasignar Ganador de Subasta**.
 
 ---
 
-## **HU-SUB-07 — Detalle de Subasta**
+## **HU-SUB-04 — Detalle de Subasta**
 
 ### **Historia:**
 
@@ -235,6 +240,12 @@ Como administrador, quiero ver el detalle completo de una subasta específica y 
     - Estado del pago: "No registrado" / "Registrado - Pendiente validación"
     - Fecha límite de pago (si está definida) con contador regresivo
     - Días transcurridos desde asignación de ganador
+
+    **Estado del Pago de garantia** (solo si estado = `vencida` y tiene pago rechazado(Movement asociados con estado `rechazado`))
+    - Estado del pago: "Pago rechazado"
+    - Motivo de Rechazo: Movement.motivo
+    - Fecha de Rechazo: Movement.fecha_resolucion
+
 - **CA-02:** Botones de acción contextuales según estado:
     
     **Si estado = `activa`:**
@@ -253,11 +264,27 @@ Como administrador, quiero ver el detalle completo de una subasta específica y 
     
     **Si estado = `vencida`:**
     
-    - "Reasignar Ganador" → **HU-SUB-04**
+    - "Reasignar Ganador" → **HU-SUB-06**
     - "Cancelar Subasta" → **HU-SUB-05**
     
-    Si **estado** = `finalizada`
+    **Si estado = `finalizada`:**
     
+    - "Gestionar Resultado Competencia" → **HU-COMP-01 (Nueva HU)**
+    - "Ver Pago Registrado" → **HU-VAL-02 — Ver Detalle de Pago (Admin)**
+    
+    **Si estado = `ganada`:**
+    
+    - "Ver Factura Generada" → **HU-BILL-01 (Nueva HU)**
+    - "Ver Pago Registrado" → **HU-VAL-02 — Ver Detalle de Pago (Admin)**
+    
+    **Si estado = `perdida`:**
+    
+    - "Ver Reembolso Procesado" → **HU-REEM-01 (Nueva HU)**
+    - "Ver Pago Registrado" → **HU-VAL-02 — Ver Detalle de Pago (Admin)**
+    
+    **Si estado = `penalizada`:**
+    
+    - "Ver Penalidad y Reembolso" → **HU-REEM-01 (Nueva HU)**
     - "Ver Pago Registrado" → **HU-VAL-02 — Ver Detalle de Pago (Admin)**
     
     **Todos los estados:**
@@ -267,7 +294,7 @@ Como administrador, quiero ver el detalle completo de una subasta específica y 
 ### **Validaciones de Negocio**
 
 - **VN-01:** Verificar que la subasta existe y no está eliminada
-- **VN-02:** Recalcular estado del pago en tiempo real basado en `pago_validado` y existencia de `Guarantee_Payment`
+- **VN-02:** Recalcular estado del pago en tiempo real basado en existencia de `Movement` tipo `pago_garantia` validado
 - **VN-03:** Solo mostrar sección de ganador si `id_offerWin` no es nulo
 
 ### **UI/UX**

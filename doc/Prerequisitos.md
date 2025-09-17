@@ -557,6 +557,7 @@ Estados de solicitud de reembolso
 **Tipos de notificación :**
 
 - `ganador_subasta` - Cliente ganó una subasta
+- `pago_vencido` - Cliente no hizo el pago de garantia a tiempo
 - `pago_registrado` - Admin: cliente registró pago pendiente validación
 - `pago_validado` - Cliente: pago fue aprobado
 - `pago_rechazado` - Cliente: pago fue rechazado

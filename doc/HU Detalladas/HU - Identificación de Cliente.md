@@ -74,17 +74,22 @@ Como sistema, quiero validar la identidad del cliente y cargar la información m
 
 - **CA-01:** Si validación es exitosa, guardar en sesión:
     - `id`, `first_name`, `last_name`, `document_type`, `document_number`,`phone_number`
-    - Información básica de saldo desde `User_Balance` (solo para mostrar disponible)
-- **CA-02:** Si no existe `User_Balance`, crear con saldo inicial = 0
-- **CA-03:** Calcular `saldo_disponible` en tiempo real usando:
+    - Información de saldo desde campos cache `User.saldo_total` y `User.saldo_retenido`
+- **CA-02:** Si los campos cache están en NULL, inicializarlos mediante función del backend
+- **CA-03:** Calcular `saldo_disponible` en tiempo real usando la nueva fórmula:
 
 ```
-saldo_disponible = saldo_total - saldo_retenido - saldo_aplicado
-                  - saldo_en_reembolso - saldo_penalizado
+Saldo Disponible = SALDO TOTAL - SALDO RETENIDO - SALDO APLICADO
+
+Donde:
+- SALDO TOTAL = User.saldo_total (cache desde Movement validados)
+- SALDO RETENIDO = User.saldo_retenido (cache desde estados de subasta)
+- SALDO APLICADO = Suma de registros en Billing del cliente
 ```
 
-- **CA-04:** No cargar movimientos ni subastas completas en esta fase
-- **CA-05:** Si hay inconsistencias en saldo, mostrar advertencia pero permitir continuar
+- **CA-04:** No cargar Movement ni subastas completas en esta fase - solo campos cache
+- **CA-05:** Si hay inconsistencias en cache vs cálculo real, mostrar advertencia pero permitir continuar
+- **CA-06:** Los campos cache se actualizan INMEDIATAMENTE vía lógica de aplicación cuando ocurren transacciones
 
 ### **UI/UX**
 
@@ -123,10 +128,11 @@ Como sistema, quiero mantener la sesión del cliente de forma segura y permitir 
 
 ### **Validaciones de Negocio:**
 
-- **CA-06:** No almacenar datos financieros en localStorage
-- **CA-07:** Solo mantener en sesión: `user_id`, `document_number`, `timestamp`
+- **CA-06:** No almacenar datos financieros sensibles en localStorage
+- **CA-07:** Solo mantener en sesión: `user_id`, `document_number`, `timestamp`, `saldo_disponible_cache`
 - **CA-08:** Validar sesión en cada navegación entre módulos
 - **CA-09:** Si sesión inválida, redirigir automáticamente a identificación
+- **CA-10:** Refrescar saldo_disponible_cache cada vez que se carga una página crítica
 
 ### **UI/UX:**
 

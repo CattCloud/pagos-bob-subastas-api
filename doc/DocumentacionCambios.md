@@ -49,7 +49,8 @@ Si cliente NO paga:
 
 ### **Estados Nuevos a Agregar:**
 
-- `ganada`: BOB ganó contra competidores en subasta general
+- `ganada`: BOB ganó competencia externa pero esperando datos de facturación del cliente
+- `facturada`: Cliente completó datos de facturación, Billing generado y saldo aplicado
 - `perdida`: BOB perdió contra competidores → proceder con reembolso
 - `penalizada`: BOB ganó pero cliente no completó pago → aplicar penalidad 30%
 
@@ -103,9 +104,10 @@ Auction {
     'finalizada',     // Existente
     'vencida',        // Existente
     'cancelada',      // Existente
-    'ganada',         // NUEVO - BOB ganó subasta general
-    'perdida',        // NUEVO - BOB perdió subasta general
-    'penalizada'      // NUEVO - Cliente no completó pago después de ganar BOB
+    'ganada', // NUEVO - BOB ganó pero esperando datos facturación cliente
+    'facturada',         // NUEVO - Cliente completó datos, Billing generado
+    'perdida',           // NUEVO - BOB perdió subasta general
+    'penalizada'         // NUEVO - Cliente no completó pago después de ganar BOB
   )
   // ... resto de campos ...
 }
@@ -333,7 +335,8 @@ Saldo Disponible = SALDO TOTAL - SALDO RETENIDO - SALDO APLICADO
 | `pendiente` | No | El cliente aún no ha registrado pago |
 | `en_validacion` | No | El pago está registrado pero no validado |
 | `finalizada` | **SÍ** | Pago validado, BOB aún no compite |
-| `ganada` | No | BOB ganó, se creó Billing, dinero aplicado |
+| `ganada` | **SÍ** | BOB ganó, esperando datos facturación cliente |
+| `facturada` | No | Cliente completó datos, Billing creado, dinero aplicado |
 | `perdida` | No | BOB perdió, se procesó reembolso |
 | `penalizada` | No | Se aplicó penalidad y reembolso parcial |
 
@@ -346,6 +349,12 @@ Saldo Disponible = SALDO TOTAL - SALDO RETENIDO - SALDO APLICADO
 - Saldo Disponible: No cambia (se cancela el aumento)
 
 **Cuando subasta pasa de `finalizada` a `ganada`:**
+
+- Se notifica al cliente para completar datos facturación
+- Saldo Retenido: Se mantiene (dinero AÚN congelado esperando facturación)
+- Saldo Disponible: No cambia (dinero sigue no disponible)
+
+**Cuando subasta pasa de `ganada` a `facturada`:**
 
 - Se crea registro en `Billing`
 - Saldo Retenido: Disminuye (ya no está congelado)

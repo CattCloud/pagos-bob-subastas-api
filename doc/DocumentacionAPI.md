@@ -8,17 +8,20 @@ RECURSOS PRINCIPALES:
 ├── Auctions (Subastas)
 ├── Assets (Vehículos)
 ├── Offers (Ofertas/Ganadores)
-├── GuaranteePayments (Pagos de Garantía)
-├── UserBalances (Saldos)
-├── Movements (Movimientos)
+├── Movement (Transacciones centrales)
+├── Movement_References (Referencias genéricas)
+├── Billing (Facturación/Saldo aplicado)
+├── Refund (Solicitudes de reembolso)
+├── Notifications (Notificaciones del sistema)
 
 RELACIONES:
-- User → UserBalance (1:1)
-- User → Movements (1:N)
-- User → GuaranteePayments (1:N)
+- User → Movement (1:N)
+- User → Billing (1:N)
+- User → Refund (1:N)
+- User → Notifications (1:N)
 - Auction → Asset (1:1)
 - Auction → Offer (1:N)
-- Offer → GuaranteePayment (1:1)
+- Movement → Movement_References (1:N)
 ```
 
 ---
@@ -62,16 +65,50 @@ RELACIONES:
 | `POST` | `/auctions/:id/reassign-winner` | Reasignar ganador | Admin |
 | `GET` | `/users/:id/won-auctions` | Subastas ganadas por cliente | Cliente |
 
-### **PAGOS DE GARANTÍA**
+### **TRANSACCIONES (MOVEMENT)**
 
 | Método | Endpoint | Descripción | Rol |
 |--------|----------|-------------|-----|
-| `GET` | `/guarantee-payments` | Listar pagos (admin: todos, cliente: propios) | Ambos |
-| `GET` | `/guarantee-payments/:id` | Detalle de pago específico | Ambos |
-| `POST` | `/guarantee-payments` | Registrar nuevo pago de garantía | Cliente |
-| `PATCH` | `/guarantee-payments/:id/approve` | Aprobar pago | Admin |
-| `PATCH` | `/guarantee-payments/:id/reject` | Rechazar pago | Admin |
-| `GET` | `/guarantee-payments/:id/voucher` | Descargar comprobante | Ambos |
+| `GET` | `/movements` | Listar transacciones (admin: todos, cliente: propios) | Ambos |
+| `GET` | `/movements/:id` | Detalle de transacción específica | Ambos |
+| `POST` | `/movements` | Registrar nuevo pago de garantía | Cliente |
+| `PATCH` | `/movements/:id/approve` | Aprobar transacción | Admin |
+| `PATCH` | `/movements/:id/reject` | Rechazar transacción | Admin |
+| `GET` | `/movements/:id/voucher` | Descargar comprobante | Ambos |
+
+### **COMPETENCIA EXTERNA**
+
+| Método | Endpoint | Descripción | Rol |
+|--------|----------|-------------|-----|
+| `PATCH` | `/auctions/:id/competition-result` | Registrar resultado competencia BOB | Admin |
+| `GET` | `/auctions/:id/competition-status` | Ver estado de competencia | Admin |
+
+### **FACTURACIÓN**
+
+| Método | Endpoint | Descripción | Rol |
+|--------|----------|-------------|-----|
+| `POST` | `/billing` | Completar datos facturación (cliente ganador) | Cliente |
+| `GET` | `/billing` | Listar facturas generadas | Admin |
+| `GET` | `/billing/:id` | Detalle de factura específica | Ambos |
+
+### **REEMBOLSOS**
+
+| Método | Endpoint | Descripción | Rol |
+|--------|----------|-------------|-----|
+| `POST` | `/refunds` | Solicitar reembolso | Cliente |
+| `GET` | `/refunds` | Listar solicitudes (admin: todas, cliente: propias) | Ambos |
+| `GET` | `/refunds/:id` | Detalle de solicitud específica | Ambos |
+| `PATCH` | `/refunds/:id/confirm` | Confirmar solicitud telefónicamente | Admin |
+| `PATCH` | `/refunds/:id/reject` | Rechazar solicitud | Admin |
+| `PATCH` | `/refunds/:id/process` | Procesar reembolso confirmado | Admin |
+
+### **NOTIFICACIONES**
+
+| Método | Endpoint | Descripción | Rol |
+|--------|----------|-------------|-----|
+| `GET` | `/notifications` | Listar notificaciones del usuario | Ambos |
+| `PATCH` | `/notifications/mark-read` | Marcar notificaciones como leídas | Ambos |
+| `GET` | `/notifications/unread-count` | Contador de no leídas | Ambos |
 
 ### **SALDOS Y MOVIMIENTOS**
 
@@ -262,19 +299,19 @@ RELACIONES:
 
 ### **PAGOS DE GARANTÍA**
 
-#### **POST /api/guarantee-payments**
+#### **POST /api/movements**
 
 **Request (Multipart Form Data):**
 ```json
 {
   "auction_id": 1, // ID de subasta, obligatorio
-  "monto_garantia": 960.00, // Decimal, obligatorio
+  "monto": 960.00, // Decimal, obligatorio (monto exacto transferido)
   "tipo_pago": "transferencia", // "deposito" | "transferencia"
   "numero_cuenta_origen": "1234567890123456", // String, obligatorio
+  "numero_operacion": "OP123456789", // String, obligatorio
   "fecha_pago": "2024-01-21T09:30:00Z", // ISO 8601, obligatorio
-  "billing_document_type": "RUC", // String, obligatorio
-  "billing_name": "Empresa Cliente S.A.", // String, obligatorio
-  "comentarios": "Transferencia realizada desde BCP", // String, opcional
+  "moneda": "USD", // String, por defecto USD
+  "concepto": "Pago garantía subasta Toyota Corolla", // String, opcional
   "voucher": "file" // File upload, obligatorio (PDF/JPG/PNG, max 5MB)
 }
 ```
@@ -284,29 +321,35 @@ RELACIONES:
 {
   "success": true,
   "data": {
-    "guarantee_payment": {
+    "movement": {
       "id": 1,
       "auction_id": 1,
       "user_id": 5,
-      "monto_garantia": 960.00,
+      "tipo_movimiento_general": "entrada",
+      "tipo_movimiento_especifico": "pago_garantia",
+      "monto": 960.00,
       "estado": "pendiente",
       "voucher_url": "https://res.cloudinary.com/bob/image/upload/v123/voucher_1.pdf",
       "created_at": "2024-01-21T09:45:00Z"
     },
-    "balance_updated": {
+    "user_cache_updated": {
       "saldo_total": 960.00,
       "saldo_retenido": 960.00,
       "saldo_disponible": 0.00
     },
     "auction_updated": {
       "estado": "en_validacion"
+    },
+    "notification_sent": {
+      "client": "pago_registrado",
+      "admin": "pago_registrado"
     }
   },
-  "message": "Pago de garantía registrado exitosamente"
+  "message": "Transacción registrada exitosamente"
 }
 ```
 
-#### **PATCH /api/guarantee-payments/:id/approve**
+#### **PATCH /api/movements/:id/approve**
 
 **Request:**
 ```json
@@ -320,24 +363,24 @@ RELACIONES:
 {
   "success": true,
   "data": {
-    "guarantee_payment": {
+    "movement": {
       "id": 1,
       "estado": "validado",
       "fecha_resolucion": "2024-01-21T11:00:00Z"
     },
-    "balance_updated": {
-      "saldo_retenido": 0.00,
-      "saldo_aplicado": 960.00
+    "user_cache_updated": {
+      "saldo_total": 2000.00,
+      "saldo_retenido": 0.00
     },
     "auction_updated": {
       "estado": "finalizada"
     }
   },
-  "message": "Pago de garantía aprobado exitosamente"
+  "message": "Transacción aprobada exitosamente"
 }
 ```
 
-#### **PATCH /api/guarantee-payments/:id/reject**
+#### **PATCH /api/movements/:id/reject**
 
 **Request:**
 ```json
@@ -356,20 +399,20 @@ RELACIONES:
 {
   "success": true,
   "data": {
-    "guarantee_payment": {
+    "movement": {
       "id": 1,
       "estado": "rechazado",
       "motivo_rechazo": "Monto incorrecto, El monto no coincide con el 8%",
       "fecha_resolucion": "2024-01-21T11:30:00Z"
     },
-    "balance_updated": {
+    "user_cache_updated": {
       "saldo_retenido": 0.00
     },
     "auction_updated": {
       "estado": "pendiente"
     }
   },
-  "message": "Pago de garantía rechazado"
+  "message": "Transacción rechazada"
 }
 ```
 
@@ -384,12 +427,10 @@ RELACIONES:
   "data": {
     "balance": {
       "user_id": 5,
-      "saldo_total": 2400.00,
-      "saldo_retenido": 960.00,
-      "saldo_aplicado": 1200.00,
-      "saldo_en_reembolso": 240.00,
-      "saldo_penalizado": 0.00,
-      "saldo_disponible": 0.00, // Calculado
+      "saldo_total": 2400.00, // Cache desde Movement
+      "saldo_retenido": 960.00, // Cache desde estados subasta
+      "saldo_aplicado": 1200.00, // Calculado desde Billing
+      "saldo_disponible": 240.00, // Total - Retenido - Aplicado
       "updated_at": "2024-01-21T12:00:00Z"
     }
   }
@@ -400,7 +441,7 @@ RELACIONES:
 
 **Query Parameters:**
 ```
-?tipo=pago_registrado,garantia_validada    // Filtrar por tipos
+?tipo_especifico=pago_garantia,reembolso,penalidad    // Filtrar por tipos específicos
 &fecha_desde=2024-01-01                    // Filtrar por fecha
 &fecha_hasta=2024-01-31
 &page=1
@@ -415,11 +456,12 @@ RELACIONES:
     "movements": [
       {
         "id": 1,
-        "tipo_movimiento": "pago_registrado",
+        "tipo_movimiento_general": "entrada",
+        "tipo_movimiento_especifico": "pago_garantia",
         "monto": 960.00,
-        "descripcion": "Pago de garantía de $960 registrado - Pendiente de validación",
-        "reference_type": "pago",
-        "reference_id": 1,
+        "concepto": "Pago de garantía - Subasta Toyota Corolla 2020",
+        "estado": "pendiente",
+        "numero_operacion": "OP123456789",
         "created_at": "2024-01-21T09:45:00Z"
       }
     ],
@@ -449,7 +491,7 @@ RELACIONES:
 2. **Fecha inicio**: Debe ser mayor a fecha/hora actual
 3. **Fecha fin**: Debe ser mayor a fecha inicio
 4. **Placa única**: No puede existir otra subasta activa con la misma placa
-5. **Estados válidos**: `activa` → `pendiente` → `en_validacion` → `finalizada`
+5. **Estados válidos**: `activa` → `pendiente` → `en_validacion` → `finalizada` → `ganada/perdida/penalizada` → `facturada`
 6. **Eliminación**: Solo si no tiene ofertas asociadas
 
 ### **GANADORES**
@@ -460,22 +502,38 @@ RELACIONES:
 4. **Fecha oferta**: Debe estar entre `fecha_inicio` y `fecha_fin` de subasta
 5. **Garantía**: Se calcula automáticamente como 8% de monto_oferta
 
-### **PAGOS DE GARANTÍA**
+### **TRANSACCIONES (MOVEMENT)**
 
 1. **Registro**: Solo ganadores actuales de subastas en estado `pendiente`
 2. **Monto exacto**: Debe coincidir exactamente con el 8% calculado
 3. **Fecha pago**: No puede ser futura ni anterior a fecha inicio de subasta
 4. **Archivo**: PDF/JPG/PNG, máximo 5MB
-5. **Actualización inmediata**: Al registrar → `saldo_total ↑`, `saldo_retenido ↑`
+5. **Actualización inmediata**: Al registrar → cache saldo recalculado vía lógica aplicación
 6. **Estado subasta**: `pendiente` → `en_validacion`
 
-### **VALIDACIÓN DE PAGOS**
+### **VALIDACIÓN DE TRANSACCIONES**
 
-1. **Solo admin**: Puede aprobar o rechazar pagos
-2. **Estado válido**: Solo pagos en estado `pendiente`
-3. **Aprobación**: `saldo_retenido ↓`, `saldo_aplicado ↑`, subasta → `finalizada`
-4. **Rechazo**: `saldo_retenido ↓`, subasta → `pendiente`
+1. **Solo admin**: Puede aprobar o rechazar transacciones
+2. **Estado válido**: Solo Movement en estado `pendiente`
+3. **Aprobación**: Cache saldo recalculado, subasta → `finalizada`
+4. **Rechazo**: Cache saldo recalculado, subasta → `pendiente`
 5. **Archivo**: Se mantiene para auditoría incluso si se rechaza
+
+### **COMPETENCIA EXTERNA**
+
+1. **Gestión resultado**: Solo admin puede registrar resultado competencia BOB
+2. **Estados finales**: `ganada`, `perdida`, `penalizada` según resultado
+3. **Irreversible**: Una vez registrado resultado no se puede cambiar
+4. **Notificaciones automáticas**: Se envían al cliente según resultado
+5. **Procesos automáticos**: Facturación, reembolsos y penalidades se activan automáticamente
+
+### **REEMBOLSOS**
+
+1. **Solicitud**: Cliente puede solicitar reembolso de saldo disponible
+2. **Tipos**: `mantener_saldo` (entrada) o `devolver_dinero` (salida)
+3. **Flujo**: solicitado → confirmado (llamada) → procesado
+4. **Validación**: Admin confirma telefónicamente antes de procesar
+5. **Movement**: Se crea al procesar, no al solicitar
 
 ### **VENCIMIENTOS**
 
@@ -484,11 +542,13 @@ RELACIONES:
 3. **Penalidad**: Máximo 30% del saldo disponible
 4. **Reasignación**: Automática al siguiente postor si existe
 
-### **SALDOS**
+### **SALDOS (NUEVA ARQUITECTURA)**
 
-1. **Cálculo disponible**: `total - retenido - aplicado - en_reembolso - penalizado`
-2. **No negativos**: El saldo disponible nunca puede ser negativo
-3. **Múltiples retenciones**: Cliente puede tener varios pagos retenidos simultáneamente
+1. **Cálculo disponible**: `Saldo Total - Saldo Retenido - Saldo Aplicado`
+2. **Cache automático**: User.saldo_total y User.saldo_retenido via lógica de aplicación
+3. **Saldo aplicado**: Calculado desde tabla Billing
+4. **No negativos**: El saldo disponible nunca puede ser negativo
+5. **Movement central**: Todas las transacciones registradas en Movement
 
 
 ---

@@ -34,9 +34,10 @@
 | **React Hook Form** | Manejo Formularios |
 | **Fetch** | HTTP Client |
 | **React Icons** | Iconografía |
-| **React Hot Toast** | Notificaciones |
+| **React Hot Toast** | Notificaciones UI |
 | **React Dropzone** | File Upload |
 | **React Query** | State Management |
+| **EmailJS** | Envío correos desde frontend |
 
 ### **BACKEND**
 
@@ -66,7 +67,8 @@
 
 | Servicio | Propósito |
 | --- | --- |
-| **Cloudinary** | Storage archivos |
+| **Cloudinary** | Storage archivos (comprobantes, vouchers) |
+| **EmailJS** | Envío automático de correos sin backend SMTP |
 
 ### **DESARROLLO Y DEPLOYMENT**
 

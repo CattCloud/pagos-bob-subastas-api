@@ -219,9 +219,9 @@ Tienen roles y permisos completamente diferentes:
 2. Admin valida pago de garantía → dinero queda retenido
 3. BOB participa en competencia externa contra otras empresas
 4. Según resultado de competencia:
-   - **BOB gana:** Se factura al cliente, saldo se aplica
+   - **BOB gana:** Cliente debe completar datos facturación → se aplica saldo
    - **BOB pierde:** Se reembolsa completamente al cliente
-   - **BOB gana pero cliente no paga:** 30% penalidad, 70% reembolso
+   - **BOB gana pero cliente no paga vehículo completo:** 30% penalidad, 70% reembolso
 
 ### **REGLAS DE PAGOS DE GARANTÍA:**
 
@@ -391,9 +391,10 @@ Cuando el ganador original no realiza el pago antes del límite:
 - `en_validacion` : Después de que el cliente registra pago, pero aún no está validado
 - `cancelada`: Se canceló por algún motivo
 - `vencida`: El ganador no pago en la fecha limite de pago
-- `ganada`: BOB ganó contra competidores en subasta general
+- `ganada`: BOB ganó pero esperando datos facturación del cliente
+- `facturada`: Cliente completó datos facturación, Billing generado y saldo aplicado
 - `perdida`: BOB perdió contra competidores → proceder con reembolso
-- `penalizada`: BOB ganó pero cliente no completó pago → aplicar penalidad 30%
+- `penalizada`: BOB ganó pero cliente no completó pago del vehículo → aplicar penalidad 30%
 
 **Atributos:**
 
@@ -402,7 +403,7 @@ Cuando el ganador original no realiza el pago antes del límite:
 - fecha_inicio*
 - fecha_fin*
 - fecha_limite_pago (Momento exacto hasta el cual el ganador puede pagar)
-- estado (activa, pendiente, en_validacion, finalizada, **ganada**, **perdida**, **penalizada**, vencida, cancelada)
+- estado (activa, pendiente, en_validacion, finalizada, **ganada**, **facturada**, **perdida**, **penalizada**, vencida, cancelada)
 - id_offerWin (es el id de la oferta que gano)
 - fecha_resultado_general (cuándo se resolvió competencia externa)
 - finished_at (Cuando ya paso la subasta a finalizado y se tiene un ganador establecido)
@@ -516,7 +517,6 @@ Cuando el ganador original no realiza el pago antes del límite:
 - monto_solicitado*
 - tipo_reembolso* (mantener_saldo/devolver_dinero)
 - estado
-- fecha_solicitud
 - fecha_respuesta_empresa (cuando la solicitud pasa a confirmado o rechazada)
 - fecha_procesamiento (cuando admin procesa)
 - motivo
@@ -527,10 +527,9 @@ Cuando el ganador original no realiza el pago antes del límite:
 
 Estados de solicitud de reembolso
 - `solicitado` → Cliente hizo la solicitud
-- `confirmado` → Empresa llamó y cliente confirmó el tipo
+- `confirmado` → Empresa llamó y cliente confirmó el tipo,inicia el proceso de reembolso
 - `rechazado` → El admin revisó la solicitud y decidió no aprobarla
 - `procesado` → Admin completó el reembolso
-- `cancelado` → Cliente canceló la solicitud
 
 ### **ENTIDAD 8: Notifications**
 
@@ -565,6 +564,7 @@ Estados de solicitud de reembolso
 - `competencia_perdida` - Cliente: BOB perdió la competencia externa
 - `penalidad_aplicada` - Cliente: se aplicó penalidad por incumplimiento
 - `reembolso_procesado` - Cliente: reembolso fue completado
+- `reembolso_solicitado` - Cliente solicita reembolso
   
 ---
 
@@ -595,7 +595,6 @@ Estados de solicitud de reembolso
 
 ### **ADMIN - Menú Lateral:**
 -  **Pagos de Garantía** (pantalla principal)
--  **Notificaciones** (badge con contador)
 -  **Gestión de Subastas** 
 -  **Nueva Subasta**
 -  **Resultados de Competencia**

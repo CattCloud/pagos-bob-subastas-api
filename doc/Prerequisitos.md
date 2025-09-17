@@ -1,4 +1,4 @@
-# Proyecto Bob - Definicion de Prerequisitos (ACTUALIZADO)
+# Proyecto Bob - Definicion de Prerequisitos
 
 ## 1. Problema y objetivo del proyecto
 

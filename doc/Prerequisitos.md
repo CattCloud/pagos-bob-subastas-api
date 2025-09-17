@@ -54,8 +54,8 @@ Tienen roles y permisos completamente diferentes:
 - **Tareas principales:**
     - Crear y gestionar subastas
     - Validar pagos de garantía (proceso manual con banco - 2 horas)
-    - **NUEVO:** Registrar resultados de competencia externa (ganada/perdida/penalizada)
-    - **NUEVO:** Generar facturas cuando BOB gana
+    - Registrar resultados de competencia externa (ganada/perdida/penalizada)
+    - Generar facturas cuando BOB gana
     - Gestionar saldos de clientes con sistema de transacciones
     - Procesar reembolsos y penalidades
 
@@ -101,6 +101,10 @@ Tienen roles y permisos completamente diferentes:
 
 - **Como cliente**, quiero saber el estado completo de mi pago: validación bancaria, resultado de competencia externa, y estado final para entender qué pasó con mi dinero.
 
+### **Sistema de Notificaciones:**
+
+- **Como cliente**, quiero recibir notificaciones automáticas en la UI y por correo electrónico sobre eventos importantes de mis subastas para estar siempre informado del estado de mis procesos.
+
 ### Historias de usuario - ROL ADMIN
 
 ### **Gestión de Pagos:**
@@ -126,6 +130,10 @@ Tienen roles y permisos completamente diferentes:
 ### **Reportes y Control:**
 
 - **Como admin**, quiero ver reportes de transacciones y saldos para tener visibilidad completa del estado financiero del sistema.
+
+### **Sistema de Notificaciones::**
+
+- **Como admin**, quiero recibir notificaciones automáticas cuando los clientes registren pagos de garantía para poder validarlos oportunamente.
 
 ---
 
@@ -189,6 +197,15 @@ Tienen roles y permisos completamente diferentes:
 - **Como admin**, quiero aplicar penalidades del 30% y reembolsos parciales del 70% cuando el cliente no paga después de que BOB gana
 - **Como admin**, quiero ver todas las solicitudes de reembolso para procesarlas
 - **Como admin**, quiero marcar reembolsos como procesados para llevar control
+
+### **MÓDULO 7: Sistema de Notificaciones**
+**Funcionalidades:**
+
+- **Como sistema**, quiero generar notificaciones automáticas en UI y correo para eventos críticos del proceso de subastas
+- **Como cliente**, quiero ver mis notificaciones pendientes en un panel de la interfaz para estar al día con mis procesos
+- **Como cliente**, quiero recibir correos automáticos sobre cambios importantes en mis subastas para no perder información crítica
+- **Como admin**, quiero recibir alertas cuando hay pagos pendientes de validación para procesarlos rápidamente
+- **Como usuario**, quiero marcar notificaciones como leídas para mantener organizada mi bandeja de notificaciones
 
 ---
 
@@ -324,6 +341,24 @@ Cuando el ganador original no realiza el pago antes del límite:
 - En `/admin-subastas`: acceso automático con datos del admin registrado
 - Si un documento no existe, DEBE mostrar error y no permitir acceso
 
+
+### **REGLAS DE NOTIFICACIONES (NUEVO):**
+
+**RN16 - Sistema Dual de Notificaciones:**
+
+- Cada evento crítico del sistema DEBE generar notificación automática en UI y correo
+- Las notificaciones se crean simultáneamente: registro en base de datos + envío por EmailJS
+- Si el correo falla, la notificación UI funciona independientemente
+- Sistema de reintentos automáticos para correos fallidos
+
+**RN17 - Eventos que Generan Notificaciones:**
+
+- Asignación de ganador → notifica al cliente ganador
+- Registro de pago → notifica al admin
+- Validación de pago → notifica al cliente
+- Cambios de estado de competencia → notifica al cliente
+- Procesamiento de reembolsos → notifica al cliente
+  
 ---
 
 ## 6. Datos y base de datos (nivel conceptual)
@@ -497,7 +532,39 @@ Estados de solicitud de reembolso
 - `procesado` → Admin completó el reembolso
 - `cancelado` → Cliente canceló la solicitud
 
+### **ENTIDAD 8: Notifications**
 
+**Representa:** Notificaciones automáticas del sistema enviadas por UI y correo electrónico
+
+**Atributos:**
+
+- id (PK)
+- user_id (FK)*
+- tipo 
+- titulo Titulo Descriptivo
+- mensaje TEXT
+- estado ('pendiente', 'vista')
+- email_status Estado de envio('pendiente', 'enviado', 'fallido')
+- reference_type  (Referencia al elemento relacionado (subasta, transacción, factura))
+- reference_id 
+- fecha_creacion 
+- fecha_vista 
+- email_sent_at  (Fecha de envío exitoso del correo)
+- email_error (Mensaje de error si falló el envío)
+- created_at
+- updated_at
+
+**Tipos de notificación :**
+
+- `ganador_subasta` - Cliente ganó una subasta
+- `pago_registrado` - Admin: cliente registró pago pendiente validación
+- `pago_validado` - Cliente: pago fue aprobado
+- `pago_rechazado` - Cliente: pago fue rechazado
+- `competencia_ganada` - Cliente: BOB ganó la competencia externa
+- `competencia_perdida` - Cliente: BOB perdió la competencia externa
+- `penalidad_aplicada` - Cliente: se aplicó penalidad por incumplimiento
+- `reembolso_procesado` - Cliente: reembolso fue completado
+  
 ---
 
 ## 7. Requisitos no funcionales
@@ -510,13 +577,16 @@ Estados de solicitud de reembolso
 - **Auditoría**: Trazabilidad completa de todas las transacciones
 - **Usabilidad**: Interfaz intuitiva para usuarios no técnicos
 - **Confiabilidad**: Jobs nocturnos de validación de consistencia
-
+- **Notificaciones**: Sistema dual UI + correo con EmailJS, máximo 200 correos/mes en plan gratuito
+- **Tiempo real**: Notificaciones aparecen inmediatamente en UI al ocurrir eventos
+  
 ---
 
 ## 8. Navegación del Sistema
 
 ### **CLIENTE - Menú Lateral:**
 -  **Mis Garantías** (pantalla principal)
+-  **Notificaciones** (nuevo - badge con contador)
 -  **Pagar Garantía**
 -  **Mi Saldo** (calculado desde transacciones)
 -  **Historial de Transacciones**
@@ -524,9 +594,10 @@ Estados de solicitud de reembolso
 
 ### **ADMIN - Menú Lateral:**
 -  **Pagos de Garantía** (pantalla principal)
+-  **Notificaciones** (badge con contador)
 -  **Gestión de Subastas** 
 -  **Nueva Subasta**
--  **Resultados de Competencia** 
+-  **Resultados de Competencia**
 -  **Gestión de Saldos** (con sistema de transacciones)
--  **Gestión de Facturación** 
+-  **Gestión de Facturación**
 -  **Gestión de Reembolsos**

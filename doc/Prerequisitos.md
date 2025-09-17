@@ -140,8 +140,8 @@ Tienen roles y permisos completamente diferentes:
 - **Como admin**, quiero registrar una nueva subasta con sus datos básicos para tener control de las subastas activas
 - **Como admin**, quiero registrar al ganador de una subasta para iniciar el proceso de pago de garantía
 - **Como admin**, quiero registrar el monto de la oferta ganadora para calcular automáticamente la garantía (8%)
-- **NUEVO:** **Como admin**, quiero registrar el resultado de la competencia externa (ganada/perdida/penalizada) para actualizar el estado final de la subasta
-- **NUEVO:** **Como admin**, quiero gestionar las transiciones de estado de subasta según el resultado de la competencia externa
+- **Como admin**, quiero registrar el resultado de la competencia externa (ganada/perdida/penalizada) para actualizar el estado final de la subasta
+- **Como admin**, quiero gestionar las transiciones de estado de subasta según el resultado de la competencia externa
 
 ### **MÓDULO 2: Gestión de Pagos de Garantía**
 

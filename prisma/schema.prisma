@@ -126,7 +126,7 @@ model Movement {
 model Refund {
   id                        String    @id @default(cuid())
   user_id                   String
-  auction_id                String?   // opcional: se enlaza en processRefund si no se proporcionó en creación
+  auction_id                String?   
   monto_solicitado          Decimal   @db.Decimal(10, 2)
   tipo_reembolso            String    // mantener_saldo, devolver_dinero
   estado                    String    @default("solicitado") // solicitado, confirmado, rechazado, procesado, cancelado

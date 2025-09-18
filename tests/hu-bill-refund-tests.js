@@ -155,8 +155,8 @@ async function listNotifications(headers, label='') {
   if (!res.ok) throw new Error(`Listar notificaciones ${label} falló`);
 }
 
-async function createRefund(clientHeaders, monto, tipo, motivo) {
-  const payload = { monto_solicitado: monto, tipo_reembolso: tipo, motivo };
+async function createRefund(clientHeaders, auctionId, monto, tipo, motivo) {
+  const payload = { auction_id: auctionId, monto_solicitado: monto, tipo_reembolso: tipo, motivo };
   const { res, data } = await req('/refunds', { method: 'POST', headers: clientHeaders, body: payload });
   if (!res.ok || !data?.data?.refund?.id) throw new Error('Crear refund falló');
   return data.data.refund.id;
@@ -251,14 +251,14 @@ async function run() {
   await listNotifications(clientHeaders, 'post-perdida');
 
   // Crear refund mantener_saldo (parcial)
-  const refundId1 = await createRefund(clientHeaders, 100, 'mantener_saldo', 'Probar refund como saldo');
+  const refundId1 = await createRefund(clientHeaders, auctionId2, 100, 'mantener_saldo', 'Probar refund como saldo');
   await manageRefund(adminHeaders, refundId1, 'confirmado', 'Llamada OK');
   await processRefund(adminHeaders, refundId1, false);
   await delay(300);
   await listNotifications(clientHeaders, 'post-refund-mantener');
 
   // Crear refund devolver_dinero (otra parte)
-  const refundId2 = await createRefund(clientHeaders, 150, 'devolver_dinero', 'Probar refund como transferencia');
+  const refundId2 = await createRefund(clientHeaders, auctionId2, 150, 'devolver_dinero', 'Probar refund como transferencia');
   await manageRefund(adminHeaders, refundId2, 'confirmado', 'Llamada OK');
   await processRefund(adminHeaders, refundId2, true);
   await delay(300);

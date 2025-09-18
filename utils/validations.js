@@ -143,11 +143,29 @@ const billingSchemas = {
 // REEMBOLSOS
 const refundSchemas = {
   createRefund: Joi.object({
-    monto_solicitado: baseSchemas.currency.required(),
+    // Enforce máximo 2 decimales sin redondeo (422 si excede)
+    monto_solicitado: Joi.number()
+      .positive()
+      .max(999999.99)
+      .custom((v, helpers) => {
+        if (typeof v !== 'number' || !Number.isFinite(v)) {
+          return helpers.error('number.base');
+        }
+        const s = String(v);
+        const dot = s.indexOf('.');
+        if (dot !== -1) {
+          const decimals = s.length - dot - 1;
+          if (decimals > 2) {
+            return helpers.error('number.precision', { limit: 2 });
+          }
+        }
+        return v;
+      })
+      .required(),
     tipo_reembolso: Joi.string().valid('mantener_saldo', 'devolver_dinero').required(),
     motivo: Joi.string().max(200).optional(),
-    // auction_id es opcional en request (se infiere en el servicio si no se envía)
-    auction_id: baseSchemas.cuid.optional(),
+    // HU-REEM-01: auction_id es obligatorio (trazabilidad por subasta)
+    auction_id: baseSchemas.cuid.required(),
   }),
   manageRefund: Joi.object({
     estado: Joi.string().valid('confirmado', 'rechazado').required(),

@@ -51,6 +51,15 @@ class RefundService {
         );
       }
 
+      // CRÍTICO: Validar contra saldo_disponible global antes de validaciones específicas
+      const balance = await balanceService.getBalance(userId, tx);
+      if (Number(monto_solicitado) > balance.saldo_disponible) {
+        throw new ConflictError(
+          `Monto solicitado ($${monto_solicitado}) excede saldo disponible ($${balance.saldo_disponible})`,
+          'INSUFFICIENT_AVAILABLE_BALANCE'
+        );
+      }
+
       // VN-06 (opcional por ahora): si se provee auction_id, validar pertenencia y retenido disponible
       if (auction_id) {
         const auction = await tx.auction.findUnique({

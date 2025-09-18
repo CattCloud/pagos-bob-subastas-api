@@ -168,11 +168,11 @@ async function getBalance(headers, userId) {
   };
 }
 
-async function createRefund(clientHeaders, monto, tipo, motivo) {
+async function createRefund(clientHeaders, auctionId, monto, tipo, motivo) {
   const { res, data } = await req('/refunds', {
     method: 'POST',
     headers: clientHeaders,
-    body: { monto_solicitado: approx2(monto), tipo_reembolso: tipo, motivo },
+    body: { auction_id: auctionId, monto_solicitado: approx2(monto), tipo_reembolso: tipo, motivo },
   });
   if (!res.ok) throw new Error('Crear refund falló');
   return data.data.refund.id;
@@ -265,7 +265,7 @@ async function run() {
   assertEq2('Aplicado tras perdida (sin cambio)', balAfterPerdida.saldo_aplicado, balAfterApprove.saldo_aplicado);
   assertEq2('Disponible tras perdida (sin cambio)', balAfterPerdida.saldo_disponible, balAfterApprove.saldo_disponible);
 
-  const refundId = await createRefund(clientHeaders, garantia, 'devolver_dinero', 'BOB no ganó la competencia externa');
+  const refundId = await createRefund(clientHeaders, auctionId, garantia, 'devolver_dinero', 'BOB no ganó la competencia externa');
   const balAfterRefundRequest = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterRefundRequest);
   assertEq2('Total tras solicitar reembolso (sin cambio)', balAfterRefundRequest.saldo_total, balAfterPerdida.saldo_total);

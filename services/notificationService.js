@@ -1,5 +1,6 @@
 const { prisma } = require('../config/database');
 const { Logger } = require('../middleware/logger');
+const { NotFoundError, ForbiddenError } = require('../middleware/errorHandler');
 
 /**
  * Servicio de Notificaciones
@@ -192,19 +193,13 @@ class NotificationService {
   async markAsRead(notificationId, userId) {
     const notif = await prisma.notification.findUnique({ where: { id: notificationId } });
     if (!notif) {
-      const err = new Error('Notificación no encontrada');
-      err.code = 'NOTIFICATION_NOT_FOUND';
-      err.status = 404;
-      throw err;
+      throw new NotFoundError('Notificación');
     }
     if (notif.user_id !== userId) {
-      const err = new Error('No tiene permisos para modificar esta notificación');
-      err.code = 'FORBIDDEN';
-      err.status = 403;
-      throw err;
+      throw new ForbiddenError('No tiene permisos para modificar esta notificación');
     }
     if (notif.estado === 'vista') return notif;
-
+  
     return prisma.notification.update({
       where: { id: notificationId },
       data: { estado: 'vista', fecha_vista: new Date() },

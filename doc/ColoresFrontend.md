@@ -44,4 +44,4 @@ Basado en el logo de BobSubastas
 
 
 ## **TIPOGRAFÍA**
-- Fuente de texto principal sera Inter
+- Fuente de texto principal sera Poppins

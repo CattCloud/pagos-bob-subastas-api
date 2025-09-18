@@ -24,7 +24,10 @@ const uploadVoucher = multer({
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Tipo de archivo no permitido. Solo se aceptan JPG, PNG y PDF'), false);
+      // Forzar código de Multer para que el error handler lo responda como 422
+      const err = new Error('Tipo de archivo no permitido. Solo se aceptan JPG, PNG y PDF');
+      err.code = 'LIMIT_UNEXPECTED_FILE';
+      cb(err, false);
     }
   },
 });

@@ -55,6 +55,50 @@ async function loginClient(docType = 'DNI', docNumber = '12345678') {
   return { sessionId: data.data.session.session_id, user: data.data.user };
 }
 
+// Cliente limpio dinámico (evitar estado previo que afecta asserts)
+function randDigits(n) {
+  let s = '';
+  for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10);
+  return s;
+}
+
+async function ensureCleanClient() {
+  const { PrismaClient } = require('@prisma/client');
+  const prisma = new PrismaClient();
+  const ruc = '20' + randDigits(9);
+  const email = `edge.${Math.random().toString(36).slice(2,8)}@test.local`;
+  let user;
+  try {
+    user = await prisma.user.create({
+      data: {
+        first_name: 'Edge',
+        last_name: 'Tester',
+        email,
+        phone_number: '+519' + randDigits(8),
+        document_type: 'RUC',
+        document_number: ruc,
+        user_type: 'client',
+        saldo_total: 0,
+        saldo_retenido: 0,
+      },
+      select: { id: true, document_type: true, document_number: true },
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+
+  const { res, data } = await req('/auth/client-login', {
+    method: 'POST',
+    body: { document_type: user.document_type, document_number: user.document_number },
+  });
+  if (!res.ok || !data?.success) throw new Error('Login cliente limpio falló');
+
+  return {
+    sessionId: data.data.session.session_id,
+    user: data.data.user,
+  };
+}
+
 async function createAuction(adminHeaders, placa) {
   const now = Date.now();
   const startISO = new Date(now + 5000).toISOString();   // empieza en 5s
@@ -201,10 +245,11 @@ async function run() {
 
   // Logins
   const adminLogin = await loginAdmin();
-  const clientLogin = await loginClient();
+  // Usar cliente limpio para evitar contaminación por estados previos
+  const cleanClient = await ensureCleanClient();
   const adminHeaders = { 'X-Session-ID': adminLogin.sessionId };
-  const clientHeaders = { 'X-Session-ID': clientLogin.sessionId };
-  const clientId = clientLogin.user.id;
+  const clientHeaders = { 'X-Session-ID': cleanClient.sessionId };
+  const clientId = cleanClient.user.id;
 
   // Balance inicial
   let bal0 = await getBalance(clientHeaders, clientId);
@@ -286,7 +331,7 @@ async function run() {
   let { res: resR1, data: dataR1 } = await req('/refunds', {
     method: 'POST',
     headers: clientHeaders,
-    body: { monto_solicitado: mantenerMonto, tipo_reembolso: 'mantener_saldo', motivo: 'Edge mantener' },
+    body: { auction_id: aucPenId, monto_solicitado: mantenerMonto, tipo_reembolso: 'mantener_saldo', motivo: 'Edge mantener' },
   });
   if (!resR1.ok) throw new Error('Crear refund mantener_saldo falló');
   const refundId1 = dataR1.data.refund.id;
@@ -307,16 +352,18 @@ async function run() {
 
   let bal6 = await getBalance(clientHeaders, clientId);
   assertFormula(bal6);
-  // Efecto mantener_saldo (según implementación actual): total +monto, disponible +monto (retenido/aplicado sin cambio)
-  assertEq2('Total tras mantener_saldo', bal6.saldo_total, bal5.saldo_total + mantenerMonto);
-  assertEq2('Disponible tras mantener_saldo', bal6.saldo_disponible, bal5.saldo_disponible + mantenerMonto);
+  // Efecto mantener_saldo en este escenario:
+  // - entrada/reembolso EXCLUIDA de saldo_total => total sin cambio
+  // - la subasta penalizada ya liberó retenido, por lo que disponible NO cambia aquí
+  assertEq2('Total tras mantener_saldo (sin cambio)', bal6.saldo_total, bal5.saldo_total);
+  assertEq2('Disponible tras mantener_saldo (sin cambio)', bal6.saldo_disponible, bal5.saldo_disponible);
 
   // Intento de reembolso excediendo disponible (debe fallar 409)
   const exceso = approx2(bal6.saldo_disponible + 1);
   let { res: resExceso } = await req('/refunds', {
     method: 'POST',
     headers: clientHeaders,
-    body: { monto_solicitado: exceso, tipo_reembolso: 'devolver_dinero', motivo: 'Debe fallar' },
+    body: { auction_id: aucPenId, monto_solicitado: exceso, tipo_reembolso: 'devolver_dinero', motivo: 'Debe fallar' },
   });
   if (resExceso.ok) throw new Error('Refund excedido NO debería permitirce');
 
@@ -324,7 +371,7 @@ async function run() {
   let { res: resR2, data: dataR2 } = await req('/refunds', {
     method: 'POST',
     headers: clientHeaders,
-    body: { monto_solicitado: devolverMonto, tipo_reembolso: 'devolver_dinero', motivo: 'Edge devolver' },
+    body: { auction_id: aucPenId, monto_solicitado: devolverMonto, tipo_reembolso: 'devolver_dinero', motivo: 'Edge devolver' },
   });
   if (!resR2.ok) throw new Error('Crear refund devolver_dinero falló');
   const refundId2 = dataR2.data.refund.id;

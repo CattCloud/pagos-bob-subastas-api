@@ -21,7 +21,7 @@ Como **cliente**, quiero solicitar reembolso de mi saldo cuando BOB pierde la co
         - 🏦 **"Mantener como Saldo"** - No requiere transferencia física, se mantiene en sistema
         - 💸 **"Devolver Dinero"** - Transferencia/depósito físico a cuenta del cliente
     - `motivo` (textarea) - Razón de la solicitud *obligatorio*
-    - `subasta asociada` (select) - Subasta asociada, mostrar subastas del cliente con estado `perdida` o `penalidad`
+    - `subasta asociada` (select obligatorio) - Subasta asociada, mostrar subastas del cliente con estado `perdida` o `penalizada`
 - **CA-04:** **Al confirmar solicitud:**
     - Crear registro en `Refund`:
         - `user_id` = cliente actual
@@ -44,7 +44,7 @@ Como **cliente**, quiero solicitar reembolso de mi saldo cuando BOB pierde la co
 - **VN-04:** Verificar que cliente tiene saldo disponible > 0
 - **VN-05:** `monto_solicitado` máximo 2 decimales
 - **VN-06:** Recalcular saldo disponible en tiempo real antes de mostrar formulario
-- **VN-07:** `auction_id` debe corresponder a una subasta donde el cliente tenga saldo retenido
+- **VN-07:** `auction_id` es obligatorio y debe corresponder a una subasta donde el cliente tenga saldo retenido
 ---
 
 ### **UI/UX:**

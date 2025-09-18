@@ -138,6 +138,7 @@ Notas:
 Request (JSON):
 ```json
 {
+  "auction_id": "cmxxxx...",
   "monto_solicitado": 150.0,
   "tipo_reembolso": "devolver_dinero",
   "motivo": "No se ganó la competencia externa"
@@ -701,11 +702,13 @@ Notas:
 
 ### **REEMBOLSOS**
 
-1. **Solicitud**: Cliente puede solicitar reembolso de saldo disponible
+1. **Solicitud**: Cliente puede solicitar reembolso con auction_id obligatorio
 2. **Tipos**: `mantener_saldo` (entrada) o `devolver_dinero` (salida)
 3. **Flujo**: solicitado → confirmado (llamada) → procesado
 4. **Validación**: Admin confirma telefónicamente antes de procesar
 5. **Movement**: Se crea al procesar, no al solicitar
+6. **Restricciones**: Monto ≤ saldo_disponible; sin solicitudes pendientes; máximo 2 decimales
+7. **RN07**: Solo subastas en estado perdida/penalizada permiten reembolso
 
 ### **VENCIMIENTOS**
 
@@ -721,6 +724,8 @@ Notas:
 3. **Saldo aplicado**: Calculado desde tabla Billing
 4. **No negativos**: El saldo disponible nunca puede ser negativo
 5. **Movement central**: Todas las transacciones registradas en Movement
+6. **RN07 Estados retenidos**: finalizada, ganada, perdida (penalizada NO retiene)
+7. **Reembolsos liberan retención**: cualquier Movement reembolso reduce saldo_retenido
 
 
 ---
@@ -785,10 +790,29 @@ Notas:
 - `ALREADY_PROCESSED` - Pago ya fue procesado
 - `INVALID_FILE_TYPE` - Tipo de archivo no permitido
 - `FILE_TOO_LARGE` - Archivo excede límite de tamaño
+- `NOT_CURRENT_WINNER` - Usuario no es el ganador actual de la subasta
+- `DUPLICATE_OPERATION_NUMBER` - Número de operación ya registrado
 
 #### **Saldos:**
 - `INSUFFICIENT_BALANCE` - Saldo insuficiente para operación
+- `INSUFFICIENT_AVAILABLE_BALANCE` - Monto excede saldo disponible específico
 - `BALANCE_CALCULATION_ERROR` - Error en cálculo de saldos
+
+#### **Reembolsos:**
+- `INVALID_REFUND_AMOUNT` - Monto de reembolso inválido (≤ 0)
+- `REFUND_PENDING_EXISTS` - Ya existe solicitud de reembolso pendiente
+- `INVALID_AUCTION_FOR_REFUND` - Subasta no válida para reembolso
+- `AUCTION_STATE_NOT_REFUNDABLE` - Estado de subasta no permite reembolso
+- `REFUND_AMOUNT_EXCEEDS_RETAINED` - Monto excede saldo retenido por subasta
+- `INVALID_REFUND_STATE` - Estado de refund no válido para operación
+
+#### **Billing:**
+- `AUCTION_NOT_WON` - Solo se puede facturar subastas ganadas
+- `INVALID_OPERATION_NUMBER` - Número de operación requerido para devolver dinero
+
+#### **Archivos:**
+- `UPLOAD_ERROR` - Error al subir archivo a Cloudinary
+- `LIMIT_UNEXPECTED_FILE` - Archivo no esperado o campo incorrecto
 
 
 ---

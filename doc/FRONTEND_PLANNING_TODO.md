@@ -13,6 +13,7 @@
 - ✅ [`doc/Arquitectura Funcional.md`](./Arquitectura%20Funcional.md) - Módulos funcionales y prioridad
 - ✅ [`doc/ColoresFrontend.md`](./ColoresFrontend.md) - Paleta colores y tipografía
 - ✅ [`doc/Notificaciones.md`](./Notificaciones.md) - Sistema dual notificaciones
+- ✅ [`doc/test`](./test) - Test realizados en el backend - Pueden usarse como guias para ver el comportamiento del backend
 
 ### **📋 HISTORIAS DE USUARIO (19 HU):**
 - ✅ HU Identificación Cliente, Registro Pago, Validación Pagos (Admin)
@@ -25,19 +26,34 @@
 
 ## **PLANIFICACIÓN FRONTEND POR FASES**
 
-### **🚀 FASE 1: CONFIGURACIÓN INICIAL Y ARQUITECTURA BASE**
-**Objetivo:** Configurar proyecto React + estructura + conexión API
+### 🚀 **FASE 1: VERIFICACIÓN DE CONFIGURACIÓN Y ARQUITECTURA BASE (ACTUALIZADA)**
 
-**TODO DETALLADO:**
-- [ ] **1.1** Crear proyecto React con Vite (`npm create vite@latest bob-subastas-frontend -- --template react`)
-- [ ] **1.2** Instalar dependencias principales:
+**Objetivo:** Validar que el proyecto React esté correctamente configurado, estructurado y conectado al backend usando `fetch`.
+
+---
+
+### ✅ **TODO DETALLADO (VERIFICACIÓN)**
+
+- [ ] **1.1** Verificar que el proyecto React con Vite fue creado correctamente  
+  > Confirmar que `vite.config.js`, `main.jsx` y `App.jsx` existen y que el proyecto corre con `npm run dev`.
+
+- [ ] **1.2** Verificar instalación de dependencias principales  
   ```bash
-  npm install react-router-dom tailwindcss react-hook-form 
-  npm install react-query react-hot-toast react-icons
-  npm install react-dropzone axios
+  npm ls react-router-dom tailwindcss react-hook-form
+  npm ls @tanstack/react-query react-hot-toast react-icons
+  npm ls react-dropzone
   ```
-- [ ] **1.3** Configurar TailwindCSS con colores custom definidos en [`doc/ColoresFrontend.md`](./ColoresFrontend.md)
-- [ ] **1.4** Crear estructura de carpetas según [`doc/Arquitectura_Stack.md`](./Arquitectura_Stack.md):
+  > Validar que todas estén presentes en `package.json` y sin conflictos.  
+  ✅ **Nota:** No se usa Axios. Se usará `fetch` nativo.
+
+- [ ] **1.3** Verificar configuración de TailwindCSS con colores personalizados  
+  > Confirmar que `tailwind.config.js` incluye la paleta definida en [`doc/ColoresFrontend.md`](./ColoresFrontend.md) y que `index.css` importa Tailwind correctamente.
+
+- [ ] **1.4** Verificar estructura de carpetas según [`doc/Arquitectura_Stack.md`](./Arquitectura_Stack.md)  
+  ```bash
+  tree src -L 2
+  ```
+  > Validar existencia de:
   ```
   src/
   ├── components/ (ui/, forms/, layout/, common/)
@@ -46,17 +62,26 @@
   ├── services/
   ├── utils/
   ├── constants/
-  ├── index.css (colores personalizados)
+  ├── index.css
   ```
-- [ ] **1.5** Configurar `src/index.css` con variables CSS según paleta de ColoresFrontend.md
-- [ ] **1.6** Crear servicio base API (`src/services/api.js`) con configuración para `http://localhost:3000`
-- [ ] **1.7** Configurar React Router con rutas principales: `/pago-subastas` y `/admin-subastas`
 
-**🧪 PUNTO DE TESTING 1:**
-- Verificar proyecto ejecuta correctamente
-- Probar rutas básicas navegan
-- Validar colores Tailwind aplicados
-- Confirmar conexión API base (GET /)
+- [ ] **1.5** Verificar que `src/index.css` contiene variables CSS según paleta  
+  > Confirmar que están definidas para su uso en el codigo.
+
+- [ ] **1.6** Verificar servicio base API (`src/services/api.js`) usando `fetch`  
+  > Confirmar que se usa `fetch` para llamadas a `http://localhost:3000` con defensas como `try/catch`, headers, y manejo de errores.
+
+- [ ] **1.7** Verificar configuración de React Router con rutas principales  
+  > Confirmar que `/pago-subastas` y `/admin-subastas` están definidas en `router` y que navegan correctamente.
+
+---
+
+### 🧪 **PUNTO DE TESTING 1**
+
+- [ ] Proyecto ejecuta correctamente (`npm run dev`)
+- [ ] Navegación entre rutas básicas funciona
+- [ ] Colores Tailwind se aplican correctamente
+- [ ] Conexión con API base (`GET /`) responde exitosamente usando `fetch`
 
 ---
 

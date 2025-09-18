@@ -274,7 +274,10 @@ Los estados de subasta siguen este flujo:
 **RN07 - Retención por Estados:**
 
 - `finalizada`: Dinero SE retiene (BOB aún no compite)
-- `ganada`, `perdida`, `penalizada`: Dinero NO se retiene (proceso resuelto)
+- `perdida`: Dinero se retiene hasta que el reembolso sea procesado (proceso resuelto)
+- `ganada`: Dinero se retiene hasta que se genere la factura (proceso resuelto)
+- `penalizada` : Dinero se retiene hasta que el reembolso sea procesado y se aplique la penalid (proceso resuelto)
+- `facturada`: Dinero NO se retiene (aplicado en Billing)
 
 **RN - Reasignación de Ganador:**
 

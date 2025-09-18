@@ -29,14 +29,13 @@
 - `POST /users/:userId/movements/manual` - Movimiento manual (Admin)
 - `GET /users/offers/stats` - Estadísticas de ofertas (Admin)
 
-### **PAGOS DE GARANTÍA** (`/guarantee-payments`)
-- `GET /guarantee-payments/stats` - Estadísticas de pagos (Admin)
-- `GET /guarantee-payments` - Listar pagos con filtros
-- `POST /guarantee-payments` - Registrar pago (Cliente)
-- `GET /guarantee-payments/:id` - Detalle de pago específico
-- `PATCH /guarantee-payments/:id/approve` - Aprobar pago (Admin)
-- `PATCH /guarantee-payments/:id/reject` - Rechazar pago (Admin)
-- `GET /guarantee-payments/:id/voucher` - Descargar comprobante
+### **MOVEMENTS (TRANSACCIONES)** (`/movements`)
+- `GET /movements` - Listar transacciones (admin: todas, cliente: propias)
+- `POST /movements` - Registrar pago de garantía (Cliente) como Movement
+- `GET /movements/:id` - Detalle de transacción específica
+- `PATCH /movements/:id/approve` - Aprobar Movement de pago (Admin)
+- `PATCH /movements/:id/reject` - Rechazar Movement de pago (Admin)
+- `GET /movements/:id/voucher` - Descargar comprobante
 
 ### **SALDOS** (`/balances`)
 - `GET /balances/dashboard` - Resumen financiero (Admin)
@@ -63,7 +62,7 @@
 - Estadísticas y reportes
 
 ### Client Only (3 endpoints)
-- `POST /guarantee-payments` - Registrar pago
+- `POST /movements` - Registrar pago de garantía
 
 ### Both Admin & Client (12 endpoints)
 - Autenticación básica

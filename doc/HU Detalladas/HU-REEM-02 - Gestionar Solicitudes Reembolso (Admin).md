@@ -77,6 +77,7 @@ Como **administrador**, quiero ver, revisar y gestionar las solicitudes de reemb
 
 - **MC-01:** **Mostrar información completa:**
     - Datos del cliente y contacto
+    - Datos de la subasta y activo asociado
     - Detalles de la solicitud (monto, tipo, motivo)
     - Saldo actual del cliente
 - **MC-02:** **Campos del modal:**

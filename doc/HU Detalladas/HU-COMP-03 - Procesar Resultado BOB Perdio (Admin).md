@@ -65,6 +65,7 @@ Como **sistema**, quiero procesar automáticamente el resultado cuando BOB pierd
     - **Correo:** Envío automático vía EmailJS con enlace directo a solicitar reembolso
     - **CTA:** "Solicitar Reembolso" con monto pre-llenado
     
+    
 - **NOT-02:** **Para el admin:**
     - **Tipo:** `competencia_perdida_procesada`
     - **Mensaje:** "BOB perdió competencia - Subasta #[id]. Cliente [nombre] puede solicitar reembolso de $[monto]"

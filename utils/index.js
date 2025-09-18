@@ -4,10 +4,11 @@ const {
   userSchemas,
   auctionSchemas,
   offerSchemas,
-  guaranteePaymentSchemas,
+  billingSchemas,
   refundSchemas,
   querySchemas,
   validate,
+  movementSchemas,
 } = require('./validations');
 
 const {
@@ -27,10 +28,11 @@ module.exports = {
     userSchemas,
     auctionSchemas,
     offerSchemas,
-    guaranteePaymentSchemas,
+    billingSchemas,
     refundSchemas,
     querySchemas,
     validate,
+    movementSchemas,
   },
   
   // Helpers

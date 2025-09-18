@@ -20,16 +20,18 @@ model User {
   document_type   String? // DNI, CE, RUC, Pasaporte - nullable para admin
   document_number String  @unique // Para identificación de clientes
   user_type       String  @default("client") // admin/client
+  saldo_total     Decimal @default(0) @db.Decimal(10, 2)
+  saldo_retenido  Decimal @default(0) @db.Decimal(10, 2)
   created_at      DateTime @default(now())
   updated_at      DateTime @updatedAt
   deleted_at      DateTime?
 
   // Relaciones
-  offers            Offer[]
-  guarantee_payments GuaranteePayment[]
-  user_balance      UserBalance?
-  movements         Movement[]
-  refunds           Refund[]
+  offers          Offer[]
+  movements       Movement[]
+  refunds         Refund[]
+  billings        Billing[]
+  notifications   Notification[]
 
   @@map("users")
 }
@@ -53,21 +55,23 @@ model Asset {
 }
 
 model Auction {
-  id                  String    @id @default(cuid())
-  asset_id            String
-  fecha_inicio        DateTime
-  fecha_fin           DateTime
-  fecha_limite_pago   DateTime?
-  estado              String    @default("activa") // activa, pendiente, en_validacion, finalizada, cancelada, vencida
-  id_offerWin         String?   // ID de la oferta ganadora
-  finished_at         DateTime?
-  created_at          DateTime  @default(now())
-  updated_at          DateTime  @updatedAt
+  id                       String    @id @default(cuid())
+  asset_id                 String
+  fecha_inicio             DateTime
+  fecha_fin                DateTime
+  fecha_limite_pago        DateTime?
+  fecha_resultado_general  DateTime?
+  estado                   AuctionEstado    @default(activa)
+  id_offerWin              String?   // ID de la oferta ganadora
+  finished_at              DateTime?
+  created_at               DateTime  @default(now())
+  updated_at               DateTime  @updatedAt
 
   // Relaciones
   asset               Asset     @relation(fields: [asset_id], references: [id], onDelete: Cascade)
   offers              Offer[]
-  guarantee_payments  GuaranteePayment[]
+  billings            Billing[]
+  refunds             Refund[]
 
   @@map("auctions")
 }
@@ -87,67 +91,34 @@ model Offer {
   // Relaciones
   auction           Auction            @relation(fields: [auction_id], references: [id], onDelete: Cascade)
   user              User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  guarantee_payment GuaranteePayment?
 
   @@map("offers")
 }
 
-model GuaranteePayment {
-  id                      String    @id @default(cuid())
-  user_id                 String
-  auction_id              String
-  offer_id                String    @unique
-  monto_garantia          Decimal   @db.Decimal(10, 2)
-  tipo_pago               String    // Deposito, Transferencia
-  numero_cuenta_origen    String
-  voucher_url             String
-  comentarios             String?
-  estado                  String    @default("pendiente") // pendiente, validado, rechazado
-  fecha_pago              DateTime
-  fecha_resolucion        DateTime?
-  billing_document_type   String    // RUC, DNI
-  billing_name            String    // Razón Social o Nombre
-  motivo_rechazo          String?
-  created_at              DateTime  @default(now())
-  updated_at              DateTime  @updatedAt
 
-  // Relaciones
-  user      User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  auction   Auction @relation(fields: [auction_id], references: [id], onDelete: Cascade)
-  offer     Offer   @relation(fields: [offer_id], references: [id], onDelete: Cascade)
-
-  @@map("guarantee_payments")
-}
-
-model UserBalance {
-  id                    String   @id @default(cuid())
-  user_id               String   @unique
-  saldo_total           Decimal  @default(0) @db.Decimal(10, 2)
-  saldo_retenido        Decimal  @default(0) @db.Decimal(10, 2)
-  saldo_aplicado        Decimal  @default(0) @db.Decimal(10, 2)
-  saldo_en_reembolso    Decimal  @default(0) @db.Decimal(10, 2)
-  saldo_penalizado      Decimal  @default(0) @db.Decimal(10, 2)
-  updated_at            DateTime @updatedAt
-
-  // Relaciones
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@map("user_balances")
-}
 
 model Movement {
-  id                String   @id @default(cuid())
-  user_id           String
-  tipo_movimiento   String   // retencion, garantia_validada, garantia_rechazada, penalidad, reembolso_solicitado, etc.
-  monto             Decimal  @db.Decimal(10, 2)
-  descripcion       String
-  reference_type    String   // pago, subasta, reembolso
-  reference_id      String
-  created_at        DateTime @default(now())
+  id                        String   @id @default(cuid())
+  user_id                   String
+  tipo_movimiento_general   MovementGeneral
+  tipo_movimiento_especifico String
+  monto                     Decimal  @db.Decimal(10, 2)
+  moneda                    String   @default("USD")
+  tipo_pago                 TipoPago?
+  numero_cuenta_origen      String?
+  voucher_url               String?
+  concepto                  String
+  estado                    MovementEstado
+  fecha_pago                DateTime?
+  fecha_resolucion          DateTime?
+  motivo_rechazo            String?
+  numero_operacion          String?
+  created_at                DateTime @default(now())
+  updated_at                DateTime @updatedAt
 
   // Relaciones
-  user              User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  // Nota: reference_id es polimórfico, se resuelve en código según reference_type
+  user        User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  references  MovementReference[]
 
   @@map("movements")
 }
@@ -155,6 +126,7 @@ model Movement {
 model Refund {
   id                        String    @id @default(cuid())
   user_id                   String
+  auction_id                String?   // opcional: se enlaza en processRefund si no se proporcionó en creación
   monto_solicitado          Decimal   @db.Decimal(10, 2)
   tipo_reembolso            String    // mantener_saldo, devolver_dinero
   estado                    String    @default("solicitado") // solicitado, confirmado, rechazado, procesado, cancelado
@@ -166,7 +138,124 @@ model Refund {
   updated_at                DateTime  @updatedAt
 
   // Relaciones
-  user      User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  auction   Auction? @relation(fields: [auction_id], references: [id], onDelete: Cascade)
 
   @@map("refunds")
+}
+
+model MovementReference {
+  id              String   @id @default(cuid())
+  movement_id     String
+  reference_type  String   // 'auction', 'offer', 'refund', 'user'
+  reference_id    String
+  created_at      DateTime @default(now())
+
+  // Relaciones
+  movement Movement @relation(fields: [movement_id], references: [id], onDelete: Cascade)
+
+  @@map("movement_references")
+}
+
+model Billing {
+  id                       String   @id @default(cuid())
+  user_id                  String
+  billing_document_type    BillingDocumentType
+  billing_document_number  String
+  billing_name             String
+  monto                    Decimal  @db.Decimal(10, 2)
+  moneda                   String   @default("USD")
+  concepto                 String   // Ej: "Compra vehículo ... - Subasta #15"
+  auction_id               String
+  created_at               DateTime @default(now())
+  updated_at               DateTime @updatedAt
+
+  // Relaciones
+  user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  auction Auction @relation(fields: [auction_id], references: [id], onDelete: Cascade)
+
+  @@map("billings")
+}
+
+model Notification {
+  id             String   @id @default(cuid())
+  user_id        String
+  tipo           NotificationTipo
+  titulo         String
+  mensaje        String
+  estado         NotificationEstado @default(pendiente)
+  email_status   EmailStatus        @default(pendiente)
+  reference_type String?
+  reference_id   String?
+  fecha_creacion DateTime @default(now())
+  fecha_vista    DateTime?
+  email_sent_at  DateTime?
+  email_error    String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  // Relaciones
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+enum MovementGeneral {
+  entrada
+  salida
+}
+
+enum MovementEstado {
+  pendiente
+  validado
+  rechazado
+}
+
+enum TipoPago {
+  deposito
+  transferencia
+  ajuste_manual
+}
+
+enum AuctionEstado {
+  activa
+  pendiente
+  en_validacion
+  finalizada
+  vencida
+  cancelada
+  ganada
+  facturada
+  perdida
+  penalizada
+}
+
+enum BillingDocumentType {
+  RUC
+  DNI
+}
+
+enum NotificationTipo {
+  ganador_subasta
+  pago_registrado
+  pago_validado
+  pago_rechazado
+  competencia_ganada
+  competencia_perdida
+  penalidad_aplicada
+  facturacion_completada
+  billing_generado
+  reembolso_procesado
+  reembolso_solicitado
+}
+
+enum NotificationEstado {
+  pendiente
+  vista
+}
+
+enum EmailStatus {
+  pendiente
+  enviado
+  fallido
 }

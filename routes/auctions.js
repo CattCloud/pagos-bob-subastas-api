@@ -9,6 +9,7 @@ const {
   deleteAuction,
   getAuctionStats,
   getExpiredAuctions,
+  registerCompetitionResult,
 } = require('../controllers/auctionController');
 const {
   createWinner,
@@ -84,6 +85,16 @@ router.patch('/:id/status', requireAdmin, updateAuctionStatus);
  * @body {string} motivo - Motivo de la extensión (opcional)
  */
 router.patch('/:id/extend-deadline', requireAdmin, extendPaymentDeadline);
+
+/**
+ * @route PATCH /api/auctions/:id/competition-result
+ * @desc Registrar resultado de competencia externa (ganada | perdida | penalizada)
+ * @access Private (Admin only)
+ * @params {string} id - ID de la subasta
+ * @body {string} resultado - 'ganada' | 'perdida' | 'penalizada'
+ * @body {string} observaciones - Observaciones opcionales
+ */
+router.patch('/:id/competition-result', requireAdmin, registerCompetitionResult);
 
 /**
  * @route POST /api/auctions/:id/winner

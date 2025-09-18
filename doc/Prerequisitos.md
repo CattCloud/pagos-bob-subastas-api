@@ -520,6 +520,7 @@ Cuando el ganador original no realiza el pago antes del límite:
 - monto_solicitado*
 - tipo_reembolso* (mantener_saldo/devolver_dinero)
 - estado
+- auction_id //Subasta asociada
 - fecha_respuesta_empresa (cuando la solicitud pasa a confirmado o rechazada)
 - fecha_procesamiento (cuando admin procesa)
 - motivo

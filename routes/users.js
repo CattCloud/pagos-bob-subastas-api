@@ -6,7 +6,7 @@ const {
   getOfferStats,
 } = require('../controllers/offerController');
 const {
-  getUserBalance,
+  getBalance,
   getUserMovements,
   createManualMovement,
 } = require('../controllers/balanceController');
@@ -44,7 +44,7 @@ router.get('/:userId/can-participate', canUserParticipate);
  * @access Private (Client own data or Admin)
  * @params {string} userId - ID del usuario
  */
-router.get('/:userId/balance', getUserBalance);
+router.get('/:userId/balance', getBalance);
 
 /**
  * @route GET /api/users/:userId/movements

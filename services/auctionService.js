@@ -212,19 +212,6 @@ class AuctionService {
           },
           orderBy: { posicion_ranking: 'asc' },
         },
-        guarantee_payments: {
-          include: {
-            user: {
-              select: {
-                first_name: true,
-                last_name: true,
-                document_type: true,
-                document_number: true,
-              },
-            },
-          },
-          orderBy: { created_at: 'desc' },
-        },
       },
     });
     
@@ -320,10 +307,21 @@ class AuctionService {
       );
     }
     
-    // Verificar que no tenga pagos asociados
-    if (auction.guarantee_payments.length > 0) {
+    // Verificar que no tenga movements de pago_garantia asociados
+    const movementsCount = await prisma.movement.count({
+      where: {
+        references: {
+          some: {
+            reference_type: 'auction',
+            reference_id: auctionId,
+          },
+        },
+        tipo_movimiento_especifico: 'pago_garantia',
+      },
+    });
+    if (movementsCount > 0) {
       throw new ConflictError(
-        'No se puede eliminar una subasta que tiene pagos asociados',
+        'No se puede eliminar una subasta que tiene transacciones de garantía asociadas',
         'HAS_PAYMENTS'
       );
     }
@@ -363,6 +361,275 @@ class AuctionService {
     
     return expiredAuctions;
   }
-}
 
+  /**
+   * Registrar resultado de competencia externa (ganada | perdida | penalizada)
+   * - ganada: estado=ganada, mantener retenido hasta facturación (facturada), notificar
+   * - perdida: estado=perdida, mantener retenido hasta que el reembolso sea procesado, notificar
+   * - penalizada: estado=penalizada, aplicar penalidad (salida 30%) y mantener retenido hasta que el reembolso sea procesado, notificar
+   */
+  async registerCompetitionResult(auctionId, resultado, observaciones = null) {
+    if (!['ganada', 'perdida', 'penalizada'].includes(resultado)) {
+      throw new ConflictError('Resultado de competencia no válido', 'INVALID_COMPETITION_RESULT');
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Obtener subasta + offer ganador (id_offerWin) + asset
+      const auction = await tx.auction.findUnique({
+        where: { id: auctionId },
+        include: {
+          asset: true,
+          offers: true,
+        },
+      });
+      if (!auction) throw BusinessErrors.AuctionNotFound();
+
+      // Validar transición: solo desde 'finalizada' se resuelve competencia
+      if (!['finalizada', 'ganada', 'perdida', 'penalizada'].includes(auction.estado) && auction.estado !== 'finalizada') {
+        throw new ConflictError(
+          `Estado actual no permite registrar resultado de competencia: ${auction.estado}`,
+          'INVALID_AUCTION_STATE'
+        );
+      }
+
+      // Offer ganador y usuario
+      const winningOfferId = auction.id_offerWin;
+      const winningOffer = auction.offers.find(o => o.id === winningOfferId);
+      if (!winningOffer) {
+        throw new ConflictError('No se encontró la oferta ganadora para esta subasta', 'NO_WINNING_OFFER');
+      }
+      const userId = winningOffer.user_id;
+
+      // Cambiar estado base + fecha_resultado_general
+      const updatedAuction = await tx.auction.update({
+        where: { id: auctionId },
+        data: {
+          estado: resultado,
+          fecha_resultado_general: new Date(),
+        },
+        include: { asset: true },
+      });
+
+      // Helpers internos
+      const recalcSaldoTotalTx = async (uid) => {
+        const entradas = await tx.movement.aggregate({
+          _sum: { monto: true },
+          where: {
+            user_id: uid,
+            estado: 'validado',
+            tipo_movimiento_general: 'entrada',
+          },
+        });
+        const salidas = await tx.movement.aggregate({
+          _sum: { monto: true },
+          where: {
+            user_id: uid,
+            estado: 'validado',
+            tipo_movimiento_general: 'salida',
+          },
+        });
+        const totalEntradas = Number(entradas._sum.monto || 0);
+        const totalSalidas = Number(salidas._sum.monto || 0);
+        const saldoTotal = Number((totalEntradas - totalSalidas).toFixed(2));
+        await tx.user.update({ where: { id: uid }, data: { saldo_total: saldoTotal } });
+        return saldoTotal;
+      };
+
+      const recalcSaldoRetenidoTx = async (uid) => {
+        // RN07: Estados que retienen: finalizada, ganada, perdida, penalizada
+        const offers = await tx.offer.findMany({
+          where: { user_id: uid },
+          select: { auction: { select: { id: true, estado: true } } },
+        });
+        const retainStates = new Set(['finalizada', 'ganada', 'perdida']);
+        const auctionIdsToRetain = offers
+          .filter((o) => o.auction && retainStates.has(o.auction.estado))
+          .map((o) => o.auction.id);
+
+        // Sumar garantías validadas asociadas a subastas retenedoras
+        let sumGarantias = 0;
+        if (auctionIdsToRetain.length > 0) {
+          const validatedGuaranteeMovs = await tx.movement.findMany({
+            where: {
+              user_id: uid,
+              estado: 'validado',
+              tipo_movimiento_general: 'entrada',
+              tipo_movimiento_especifico: 'pago_garantia',
+              references: {
+                some: {
+                  reference_type: 'auction',
+                  reference_id: { in: auctionIdsToRetain },
+                },
+              },
+            },
+            select: { monto: true },
+          });
+          sumGarantias = validatedGuaranteeMovs.reduce((acc, m) => acc + Number(m.monto || 0), 0);
+        }
+
+        // Restar reembolsos de salida ya procesados (validados) SOLO de estas subastas retenedoras
+        let sumReembolsos = 0;
+        if (auctionIdsToRetain.length > 0) {
+          const refundMovs = await tx.movement.findMany({
+            where: {
+              user_id: uid,
+              estado: 'validado',
+              tipo_movimiento_general: 'salida',
+              tipo_movimiento_especifico: 'reembolso',
+              references: {
+                some: {
+                  reference_type: 'auction',
+                  reference_id: { in: auctionIdsToRetain },
+                },
+              },
+            },
+            select: { monto: true },
+          });
+          sumReembolsos = refundMovs.reduce((acc, m) => acc + Number(m.monto || 0), 0);
+        }
+
+        const saldoRetenido = Number(Math.max(0, sumGarantias - sumReembolsos).toFixed(2));
+        await tx.user.update({ where: { id: uid }, data: { saldo_retenido: saldoRetenido } });
+        return saldoRetenido;
+      };
+
+      // Crear notificación dentro de la TX, pero enviar email fuera de la TX para evitar expiración (P2028)
+      const notifySafe = async (tipo, { uid, titulo, mensaje, reference_type, reference_id }) => {
+        try {
+          const notif = await tx.notification.create({
+            data: {
+              user_id: uid,
+              tipo,
+              titulo,
+              mensaje,
+              estado: 'pendiente',
+              email_status: 'pendiente',
+              reference_type: reference_type ?? null,
+              reference_id: reference_id ?? null,
+            },
+          });
+
+          // Envío de correo fuera de la transacción (no bloqueante)
+          setTimeout(async () => {
+            try {
+              const emailService = require('../services/emailService');
+              await emailService.send({
+                toUserId: uid,
+                subject: titulo,
+                body: mensaje,
+              });
+              await prisma.notification.update({
+                where: { id: notif.id },
+                data: { email_status: 'enviado', email_sent_at: new Date() },
+              });
+            } catch (e) {
+              try {
+                await prisma.notification.update({
+                  where: { id: notif.id },
+                  data: { email_status: 'fallido', email_error: e?.message?.slice(0, 300) ?? 'unknown_error' },
+                });
+              } catch (updErr) {
+                Logger.warn(`No se pudo actualizar estado de email para notificación (${tipo}): ${updErr.message}`);
+              }
+            }
+          }, 0);
+        } catch (e) {
+          Logger.warn(`No se pudo crear notificación (${tipo}): ${e.message}`);
+        }
+      };
+
+      switch (resultado) {
+        case 'ganada': {
+          // RN07: Mantener retenido sin cambios hasta facturación, solo notificar
+          await notifySafe('competencia_ganada', {
+            uid: userId,
+            titulo: '¡BOB ganó la competencia!',
+            mensaje: `BOB ganó la competencia externa para la subasta ${updatedAuction.asset?.placa ?? ''}. Completa tus datos de facturación.`,
+            reference_type: 'auction',
+            reference_id: auctionId,
+          });
+          // NO recalcular retenido: debe mantenerse igual hasta la facturación
+          break;
+        }
+        case 'perdida': {
+          // RN07: Mantener retenido hasta que el reembolso sea procesado
+          await notifySafe('competencia_perdida', {
+            uid: userId,
+            titulo: 'Competencia externa perdida',
+            mensaje: `BOB no ganó la competencia externa para la subasta ${updatedAuction.asset?.placa ?? ''}. El dinero de la garantía seguirá retenido hasta que se procese el reembolso.`,
+            reference_type: 'auction',
+            reference_id: auctionId,
+          });
+          // No recalcular retenido aquí para mantener la retención vigente hasta el reembolso
+          break;
+        }
+        case 'penalizada': {
+          // Penalidad 30% de garantía validada asociada a esta subasta
+          const agg = await tx.movement.aggregate({
+            _sum: { monto: true },
+            where: {
+              user_id: userId,
+              estado: 'validado',
+              tipo_movimiento_general: 'entrada',
+              tipo_movimiento_especifico: 'pago_garantia',
+              references: {
+                some: { reference_type: 'auction', reference_id: auctionId },
+              },
+            },
+          });
+          const garantiaTotal = Number(agg._sum.monto || 0);
+          const penalidad = Number((garantiaTotal * 0.30).toFixed(2));
+
+          if (penalidad > 0) {
+            const penalMovement = await tx.movement.create({
+              data: {
+                user_id: userId,
+                tipo_movimiento_general: 'salida',
+                tipo_movimiento_especifico: 'penalidad',
+                monto: penalidad,
+                moneda: 'USD',
+                tipo_pago: null,
+                numero_cuenta_origen: null,
+                voucher_url: null,
+                concepto: `Penalidad 30% por no completar pago de vehículo - Subasta ${updatedAuction.asset?.placa ?? ''}`,
+                estado: 'validado',
+                fecha_pago: new Date(),
+                fecha_resolucion: new Date(),
+                motivo_rechazo: null,
+                numero_operacion: null,
+                references: {
+                  create: [
+                    { reference_type: 'auction', reference_id: auctionId },
+                  ],
+                },
+              },
+            });
+
+            await notifySafe('penalidad_aplicada', {
+              uid: userId,
+              titulo: 'Penalidad aplicada',
+              mensaje: `Se aplicó penalidad del 30% de la garantía para la subasta ${updatedAuction.asset?.placa ?? ''}.`,
+              reference_type: 'movement',
+              reference_id: penalMovement.id,
+            });
+          }
+
+          // Recalcular caches
+          await recalcSaldoTotalTx(userId);
+          await recalcSaldoRetenidoTx(userId);
+          break;
+        }
+      }
+
+      return {
+        auction: updatedAuction,
+        resultado,
+        observaciones: observaciones || undefined,
+      };
+    });
+
+    return result;
+  }
+}
+ 
 module.exports = new AuctionService();

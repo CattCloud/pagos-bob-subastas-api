@@ -52,9 +52,12 @@ app.get('/', (req, res) => {
 app.use('/auth', require('./routes/auth'));
 app.use('/auctions', require('./routes/auctions'));
 app.use('/users', require('./routes/users'));
-app.use('/guarantee-payments', require('./routes/guaranteePayments'));
+app.use('/movements', require('./routes/movements'));
 app.use('/balances', require('./routes/balances'));
 app.use('/jobs', require('./routes/jobs'));
+app.use('/billing', require('./routes/billing'));
+app.use('/notifications', require('./routes/notifications'));
+app.use('/refunds', require('./routes/refunds'));
 
 // 404 handler - Express 5.x compatible
 app.use((req, res, next) => {

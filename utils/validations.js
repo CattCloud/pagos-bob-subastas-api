@@ -28,7 +28,7 @@ const baseSchemas = {
 
   // Estados
   userType: Joi.string().valid('admin', 'client'),
-  auctionStatus: Joi.string().valid('activa', 'pendiente', 'en_validacion', 'finalizada', 'cancelada', 'vencida'),
+  auctionStatus: Joi.string().valid('activa', 'pendiente', 'en_validacion', 'finalizada', 'vencida', 'cancelada', 'ganada', 'facturada', 'perdida', 'penalizada'),
   paymentStatus: Joi.string().valid('pendiente', 'validado', 'rechazado'),
   offerStatus: Joi.string().valid('activa', 'ganadora', 'perdedora'),
   refundStatus: Joi.string().valid('solicitado', 'confirmado', 'rechazado', 'procesado', 'cancelado'),
@@ -104,6 +104,10 @@ const auctionSchemas = {
     fecha_limite_pago: baseSchemas.futureDatetime.required(),
     motivo: Joi.string().max(200).optional(),
   }),
+  competitionResult: Joi.object({
+    resultado: Joi.string().valid('ganada', 'perdida', 'penalizada').required(),
+    observaciones: Joi.string().max(500).optional(),
+  }),
 };
 
 // OFERTAS
@@ -122,22 +126,59 @@ const offerSchemas = {
   }),
 };
 
-// PAGOS
-const guaranteePaymentSchemas = {
+// BILLING
+const billingSchemas = {
+  createBilling: Joi.object({
+    auction_id: baseSchemas.cuid.required(),
+    billing_document_type: Joi.string().valid('RUC', 'DNI').required(),
+    billing_document_number: Joi.alternatives().conditional('billing_document_type', [
+      { is: 'RUC', then: baseSchemas.rucNumber.required() },
+      { is: 'DNI', then: baseSchemas.dniNumber.required() },
+    ]),
+    billing_name: Joi.string().min(3).max(200).required(),
+  }),
+};
+
+
+// REEMBOLSOS
+const refundSchemas = {
+  createRefund: Joi.object({
+    monto_solicitado: baseSchemas.currency.required(),
+    tipo_reembolso: Joi.string().valid('mantener_saldo', 'devolver_dinero').required(),
+    motivo: Joi.string().max(200).optional(),
+    // auction_id es opcional en request (se infiere en el servicio si no se envía)
+    auction_id: baseSchemas.cuid.optional(),
+  }),
+  manageRefund: Joi.object({
+    estado: Joi.string().valid('confirmado', 'rechazado').required(),
+    motivo: Joi.string().max(300).optional(),
+  }),
+  processRefund: Joi.object({
+    tipo_transferencia: Joi.string().valid('transferencia', 'deposito').optional(),
+    banco_destino: Joi.string().min(3).max(50).optional(),
+    numero_cuenta_destino: Joi.string().min(10).max(20).optional(),
+    numero_operacion: Joi.string().min(3).max(100).optional(),
+    // Permitir opcionalmente pasar auction_id para trazabilidad explícita
+    auction_id: baseSchemas.cuid.optional(),
+  }),
+};
+
+// MOVIMIENTOS (Movement)
+const movementSchemas = {
   createPayment: Joi.object({
     auction_id: baseSchemas.cuid.required(),
-    monto_garantia: baseSchemas.currency.required(),
-    tipo_pago: Joi.string().valid('Deposito', 'Transferencia').required(),
+    monto: baseSchemas.currency.required(),
+    tipo_pago: Joi.string().valid('deposito', 'transferencia').required(),
     numero_cuenta_origen: Joi.string().min(10).max(20).required(),
+    numero_operacion: Joi.string().max(100).optional(),
     fecha_pago: baseSchemas.datetime.required(),
-    billing_document_type: Joi.string().valid('RUC', 'DNI').required(),
-    billing_name: Joi.string().min(3).max(100).required(),
+    moneda: Joi.string().length(3).uppercase().default('USD'),
+    concepto: Joi.string().max(300).default('Pago de garantía'),
+  }),
+  approve: Joi.object({
     comentarios: Joi.string().max(300).optional(),
   }),
-  approvePayment: Joi.object({
-    comentarios: Joi.string().max(300).optional(),
-  }),
-  rejectPayment: Joi.object({
+  reject: Joi.object({
     motivos: Joi.array().items(Joi.string().valid(
       'Monto incorrecto',
       'Comprobante ilegible',
@@ -148,21 +189,17 @@ const guaranteePaymentSchemas = {
     otros_motivos: Joi.string().max(200).optional(),
     comentarios: Joi.string().max(300).optional(),
   }),
+  listFilters: Joi.object({
+    tipo_especifico: Joi.alternatives().try(
+      Joi.string().valid('pago_garantia', 'reembolso', 'penalidad', 'ajuste_manual'),
+      Joi.string().custom((value) => value.split(',').map(s => s.trim()))
+    ).optional(),
+    estado: Joi.alternatives().try(
+      Joi.string().valid('pendiente', 'validado', 'rechazado'),
+      Joi.string().custom((value) => value.split(',').map(s => s.trim()))
+    ).optional(),
+  }).concat(pagination).concat(dateRange),
 };
-
-// REEMBOLSOS
-const refundSchemas = {
-  createRefund: Joi.object({
-    monto_solicitado: baseSchemas.currency.required(),
-    tipo_reembolso: Joi.string().valid('mantener_saldo', 'devolver_dinero').required(),
-    motivo: Joi.string().max(200).optional(),
-  }),
-  processRefund: Joi.object({
-    estado: Joi.string().valid('confirmado', 'rechazado', 'procesado').required(),
-    motivo: Joi.string().max(200).optional(),
-  }),
-};
-
 // CONSULTAS Y FILTROS
 const querySchemas = {
   pagination,
@@ -183,6 +220,29 @@ const querySchemas = {
       ),
       Joi.string().custom((value) => value.split(',').map(s => s.trim()))
     ).optional(),
+  }).concat(pagination).concat(dateRange),
+  notificationFilters: Joi.object({
+    estado: Joi.alternatives().try(
+      Joi.string().valid('pendiente', 'vista'),
+      Joi.string().custom((value) => value.split(',').map(s => s.trim()))
+    ).optional(),
+    tipo: Joi.alternatives().try(
+      Joi.string().valid(
+        'ganador_subasta',
+        'pago_registrado',
+        'pago_validado',
+        'pago_rechazado',
+        'competencia_ganada',
+        'competencia_perdida',
+        'penalidad_aplicada',
+        'facturacion_completada',
+        'billing_generado',
+        'reembolso_procesado',
+        'reembolso_solicitado'
+      ),
+      Joi.string().custom((value) => value.split(',').map(s => s.trim()))
+    ).optional(),
+    search: Joi.string().max(100).optional(),
   }).concat(pagination).concat(dateRange),
 };
 
@@ -216,8 +276,9 @@ module.exports = {
   userSchemas,
   auctionSchemas,
   offerSchemas,
-  guaranteePaymentSchemas,
+  billingSchemas,
   refundSchemas,
   querySchemas,
   validate,
+  movementSchemas,
 };

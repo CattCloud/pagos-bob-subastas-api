@@ -157,49 +157,7 @@ class OfferService {
       }
       
       // Aplicar penalidad al ganador anterior si corresponde
-      let penaltyApplied = null;
-      if (auction.estado !== 'vencida') { // Si ya está vencida, la penalidad se aplicó automáticamente
-        const currentUser = currentWinningOffer.user;
-        
-        // Obtener saldo actual del usuario
-        const userBalance = await tx.userBalance.findUnique({
-          where: { user_id: currentUser.id },
-        });
-        
-        if (userBalance) {
-          const availableBalance = businessCalculations.calculateAvailableBalance(userBalance);
-          const penaltyAmount = businessCalculations.calculatePenalty(availableBalance);
-          
-          if (penaltyAmount > 0) {
-            // Aplicar penalidad
-            await tx.userBalance.update({
-              where: { user_id: currentUser.id },
-              data: {
-                saldo_penalizado: { increment: penaltyAmount },
-              },
-            });
-            
-            // Registrar movimiento de penalidad
-            await tx.movement.create({
-              data: {
-                user_id: currentUser.id,
-                tipo_movimiento: 'penalidad',
-                monto: -penaltyAmount,
-                descripcion: `Penalidad del 30% aplicada por no pagar garantía a tiempo - Subasta ${auction.asset.placa}`,
-                reference_type: 'subasta',
-                reference_id: auctionId,
-              },
-            });
-            
-            penaltyApplied = {
-              user: formatters.fullName(currentUser),
-              amount: penaltyAmount,
-            };
-            
-            Logger.warn(`Penalidad aplicada: ${penaltyAmount} a ${currentUser.email}`);
-          }
-        }
-      }
+      const penaltyApplied = null; // Penalidad solo aplica cuando estado 'penalizada' según nueva arquitectura
       
       // Marcar oferta anterior como perdedora
       await tx.offer.update({
@@ -284,15 +242,6 @@ class OfferService {
               asset: true,
             },
           },
-          guarantee_payment: {
-            select: {
-              id: true,
-              estado: true,
-              monto_garantia: true,
-              fecha_pago: true,
-              created_at: true,
-            },
-          },
         },
         orderBy: { fecha_asignacion_ganador: 'desc' },
         skip: offset,
@@ -302,9 +251,25 @@ class OfferService {
     ]);
     
     // Formatear resultados
-    const wonAuctions = offers.map(offer => {
+    const wonAuctions = await Promise.all(offers.map(async (offer) => {
       const monto_garantia = businessCalculations.calculateGuaranteeAmount(offer.monto_oferta);
-      
+
+      // Buscar movement de pago_garantia para esta subasta y usuario
+      const paymentMovement = await prisma.movement.findFirst({
+        where: {
+          user_id: userId,
+          tipo_movimiento_general: 'entrada',
+          tipo_movimiento_especifico: 'pago_garantia',
+          references: {
+            some: {
+              reference_type: 'auction',
+              reference_id: offer.auction.id,
+            },
+          },
+        },
+        orderBy: { created_at: 'desc' },
+      });
+
       return {
         offer_id: offer.id,
         auction: {
@@ -317,23 +282,23 @@ class OfferService {
         },
         offer_details: {
           monto_oferta: offer.monto_oferta,
-          monto_garantia: monto_garantia,
+          monto_garantia,
           fecha_oferta: offer.fecha_oferta,
           fecha_asignacion: offer.fecha_asignacion_ganador,
           estado: offer.estado,
         },
-        payment_status: offer.guarantee_payment ? {
+        payment_status: paymentMovement ? {
           has_payment: true,
-          payment_id: offer.guarantee_payment.id,
-          estado: offer.guarantee_payment.estado,
-          monto_pagado: offer.guarantee_payment.monto_garantia,
-          fecha_pago: offer.guarantee_payment.fecha_pago,
+          movement_id: paymentMovement.id,
+          estado: paymentMovement.estado,
+          monto_pagado: paymentMovement.monto,
+          fecha_pago: paymentMovement.fecha_pago,
         } : {
           has_payment: false,
           monto_requerido: monto_garantia,
         },
       };
-    });
+    }));
     
     const pagination = {
       page: parseInt(page),

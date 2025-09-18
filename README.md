@@ -4,14 +4,16 @@ API backend para el sistema de gestión de pagos de garantía en subastas indust
 
 ## Características Principales
 
-- ✅ **Gestión completa de subastas y activos**
-- ✅ **Sistema de ganadores con reasignaciones automáticas**
-- ✅ **Registro y validación de pagos de garantía**
-- ✅ **Gestión automática de saldos y movimientos**
-- ✅ **Jobs automáticos para vencimientos y penalidades**
-- ✅ **Subida de archivos a Cloudinary**
-- ✅ **Sistema de sesiones sin autenticación tradicional**
-- ✅ **37 endpoints REST completamente documentados**
+- ✅ Gestión completa de subastas y activos
+- ✅ Sistema de ganadores con reasignaciones automáticas
+- ✅ Registro y validación de pagos de garantía como Movement
+- ✅ Gestión automática de saldos (cache en User) y movimientos (Movement)
+- ✅ Facturación (Billing) y Reembolsos (Refunds)
+- ✅ Notificaciones persistentes y envío de correos (EmailJS S2S)
+- ✅ Jobs automáticos para vencimientos y penalidades
+- ✅ Subida de archivos a Cloudinary
+- ✅ Sesiones simples por header (sin auth tradicional)
+- ✅ Endpoints REST documentados
 
 ## Stack Tecnológico
 
@@ -76,6 +78,14 @@ SESSION_SECRET=tu_clave_secreta_muy_segura
 
 # FRONTEND
 FRONTEND_URL=http://localhost:5173
+
+# EMAILJS (Server-to-Server)
+EMAILJS_SERVICE_ID=service_xxxxxx
+EMAILJS_TEMPLATE_ID=template_xxxxxx
+EMAILJS_PUBLIC_KEY=xxxxxxxxxxxxxxxx
+EMAILJS_PRIVATE_KEY=xxxxxxxxxxxxxxxx
+EMAIL_SENDER_NAME="BOB Subastas"
+EMAIL_SENDER="no-reply@bobsubastas.com"
 ```
 
 ### 4. Configurar base de datos
@@ -170,12 +180,13 @@ POST /auctions             # Crear subasta
 POST /auctions/:id/winner  # Asignar ganador
 ```
 
-### Pagos de Garantía
+### Movements (Transacciones)
 ```
-GET /guarantee-payments           # Listar pagos
-POST /guarantee-payments          # Registrar pago (Cliente)
-PATCH /guarantee-payments/:id/approve  # Aprobar (Admin)
-PATCH /guarantee-payments/:id/reject   # Rechazar (Admin)
+GET /movements                          # Listar transacciones (admin: todas, cliente: propias)
+POST /movements                         # Registrar pago de garantía (Cliente) como Movement
+PATCH /movements/:id/approve            # Aprobar Movement de pago (Admin)
+PATCH /movements/:id/reject             # Rechazar Movement de pago (Admin)
+GET /movements/:id/voucher              # Descargar comprobante
 ```
 
 **Ver lista completa**: [`tests/endpoints-summary.md`](tests/endpoints-summary.md)

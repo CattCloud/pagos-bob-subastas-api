@@ -71,58 +71,27 @@ class AuctionJobs {
       }
       
       const currentWinner = currentOffer.user;
-      
-      // 1. Aplicar penalidad al ganador actual
-      let penaltyApplied = 0;
-      const userBalance = await tx.userBalance.findUnique({
-        where: { user_id: currentWinner.id },
-      });
-      
-      if (userBalance) {
-        const availableBalance = businessCalculations.calculateAvailableBalance(userBalance);
-        penaltyApplied = businessCalculations.calculatePenalty(availableBalance);
-        
-        if (penaltyApplied > 0) {
-          // Aplicar penalidad
-          await tx.userBalance.update({
-            where: { user_id: currentWinner.id },
-            data: {
-              saldo_penalizado: { increment: penaltyApplied },
-            },
-          });
-          
-          // Registrar movimiento de penalidad
-          await tx.movement.create({
-            data: {
-              user_id: currentWinner.id,
-              tipo_movimiento: 'penalidad',
-              monto: -penaltyApplied,
-              descripcion: `Penalidad automática del 30% por vencimiento de plazo de pago - Subasta ${auction.asset.placa}`,
-              reference_type: 'subasta',
-              reference_id: auction.id,
-            },
-          });
-          
-          Logger.warn(`💰 Penalidad aplicada: $${penaltyApplied} a ${formatters.fullName(currentWinner)}`);
-        }
-      }
-      
-      // 2. Marcar oferta actual como perdedora
+
+      // REGLA NUEVA:
+      // No se aplica penalidad en vencimiento. Penalidad solo cuando BOB gana y cliente no paga vehículo (estado 'penalizada').
+      // Aquí solo se marca la oferta actual como perdedora y la subasta como 'vencida'.
+
+      // 1. Marcar oferta actual como perdedora
       await tx.offer.update({
         where: { id: currentOffer.id },
         data: { estado: 'perdedora' },
       });
-      
-      // 3. Actualizar estado de subasta a 'vencida'
+
+      // 2. Actualizar estado de subasta a 'vencida'
       await tx.auction.update({
         where: { id: auction.id },
         data: { estado: 'vencida' },
       });
-      
+
       return {
         auction_id: auction.id,
         previous_winner: formatters.fullName(currentWinner),
-        penalty_applied: penaltyApplied,
+        penalty_applied: 0,
         placa: auction.asset.placa,
       };
     });
@@ -220,22 +189,30 @@ class AuctionJobs {
       today.setHours(0, 0, 0, 0);
       
       // Estadísticas del día anterior
-      const stats = await Promise.all([
+      const [
+        subastasCreadas,
+        pagosRegistrados,
+        pagosValidados,
+        subastasFinalizadas,
+        movimientosTotales,
+      ] = await Promise.all([
         // Subastas creadas
         prisma.auction.count({
           where: {
             created_at: { gte: yesterday, lt: today },
           },
         }),
-        // Pagos registrados
-        prisma.guaranteePayment.count({
+        // Movements de pago de garantía registrados ayer
+        prisma.movement.count({
           where: {
+            tipo_movimiento_especifico: 'pago_garantia',
             created_at: { gte: yesterday, lt: today },
           },
         }),
-        // Pagos validados
-        prisma.guaranteePayment.count({
+        // Movements de pago de garantía validados ayer
+        prisma.movement.count({
           where: {
+            tipo_movimiento_especifico: 'pago_garantia',
             estado: 'validado',
             fecha_resolucion: { gte: yesterday, lt: today },
           },
@@ -254,14 +231,14 @@ class AuctionJobs {
           },
         }),
       ]);
-      
+
       const report = {
         fecha: yesterday.toISOString().split('T')[0],
-        subastas_creadas: stats[0],
-        pagos_registrados: stats[1],
-        pagos_validados: stats[2],
-        subastas_finalizadas: stats[3],
-        movimientos_totales: stats[4],
+        subastas_creadas: subastasCreadas,
+        pagos_registrados: pagosRegistrados,
+        pagos_validados: pagosValidados,
+        subastas_finalizadas: subastasFinalizadas,
+        movimientos_totales: movimientosTotales,
       };
       
       Logger.info('📈 Reporte diario generado:', report);

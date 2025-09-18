@@ -21,12 +21,14 @@ Como **cliente**, quiero solicitar reembolso de mi saldo cuando BOB pierde la co
         - 🏦 **"Mantener como Saldo"** - No requiere transferencia física, se mantiene en sistema
         - 💸 **"Devolver Dinero"** - Transferencia/depósito físico a cuenta del cliente
     - `motivo` (textarea) - Razón de la solicitud *obligatorio*
+    - `subasta asociada` (select) - Subasta asociada, mostrar subastas del cliente con estado `perdida` o `penalidad`
 - **CA-04:** **Al confirmar solicitud:**
     - Crear registro en `Refund`:
         - `user_id` = cliente actual
         - `monto_solicitado` = monto ingresado
         - `tipo_reembolso` = tipo seleccionado
         - `estado` = 'solicitado'
+        - `auction_id` = subasta seleccionada
         - `motivo` = motivo ingresado
         - `created_at` = now()
     - Crear notificación automática para admin tipo `reembolso_solicitado`
@@ -42,7 +44,7 @@ Como **cliente**, quiero solicitar reembolso de mi saldo cuando BOB pierde la co
 - **VN-04:** Verificar que cliente tiene saldo disponible > 0
 - **VN-05:** `monto_solicitado` máximo 2 decimales
 - **VN-06:** Recalcular saldo disponible en tiempo real antes de mostrar formulario
-
+- **VN-07:** `auction_id` debe corresponder a una subasta donde el cliente tenga saldo retenido
 ---
 
 ### **UI/UX:**
@@ -104,29 +106,7 @@ Como **cliente**, quiero solicitar reembolso de mi saldo cuando BOB pierde la co
 
 ---
 
-### **Campos de Base de Datos Actualizados:**
 
-```sql
--- Crear solicitud de reembolso
-INSERT INTO Refund (
-    user_id, monto_solicitado, tipo_reembolso, 
-    estado, motivo, created_at
-) VALUES (
-    [client_user_id], [monto_solicitado], [tipo_reembolso],
-    'solicitado', [motivo], NOW()
-)
-
--- Crear notificación para admin
-INSERT INTO Notifications (
-    user_id, tipo, titulo, mensaje, 
-    reference_type, reference_id, estado, email_status
-) VALUES (
-    [admin_user_id], 'reembolso_solicitado',
-    'Nueva solicitud de reembolso',
-    'Cliente [nombre] solicitó reembolso de $[monto] - Tipo: [tipo]',
-    'refund', [refund_id], 'pendiente', 'pendiente'
-)
-```
 
 ---
 

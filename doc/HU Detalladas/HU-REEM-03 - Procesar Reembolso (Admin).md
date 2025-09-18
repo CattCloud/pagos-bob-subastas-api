@@ -49,6 +49,9 @@ Como **administrador**, quiero procesar las solicitudes de reembolso que ya fuer
         - `numero_cuenta_origen` = cuenta BOB
         - `numero_operacion` = numero_operacion_reembolso
         - `voucher_url` = archivo comprobante subido
+    - Crear registros en Movement_References:
+        - reference_type = 'auction', reference_id = auction_id del Refund
+        - reference_type = 'refund', reference_id = refund_id
     - Backend ejecuta función para recalcular saldos INMEDIATAMENTE
     - Crear notificación `reembolso_procesado` para cliente
 
@@ -149,6 +152,11 @@ INSERT INTO Movement (
     'validado', [cuenta_bob], NOW()
 )
 
+-- Crear referencias del Movement de reembolso
+INSERT INTO Movement_References (movement_id, reference_type, reference_id) VALUES 
+([movement_id], 'auction', [refund.auction_id]),
+([movement_id], 'refund', [refund_id])
+
 -- Si devolver_dinero:
 INSERT INTO Movement (
     user_id, tipo_movimiento_general, tipo_movimiento_especifico,
@@ -158,6 +166,8 @@ INSERT INTO Movement (
     [monto_solicitado], 'Reembolso transferido - [motivo]',
     'validado', [cuenta_bob], [numero_operacion_reembolso], NOW()
 )
+
+
 ```
 
 ---

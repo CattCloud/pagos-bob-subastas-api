@@ -2,8 +2,8 @@ const balanceService = require('../services/balanceService');
 const { 
   asyncHandler 
 } = require('../middleware/errorHandler');
-const { 
-  validations: { querySchemas, validate } 
+const {
+  validations: { movementSchemas, querySchemas, validate }
 } = require('../utils');
 const { Logger } = require('../middleware/logger');
 
@@ -11,7 +11,7 @@ const { Logger } = require('../middleware/logger');
  * Obtener saldo de usuario
  * GET /api/users/:userId/balance
  */
-const getUserBalance = asyncHandler(async (req, res) => {
+const getBalance = asyncHandler(async (req, res) => {
   const { userId } = req.params;
   
   // Los clientes solo pueden ver su propio saldo
@@ -31,7 +31,7 @@ const getUserBalance = asyncHandler(async (req, res) => {
   });
   
   // Obtener saldo usando el servicio
-  const balance = await balanceService.getUserBalance(userId);
+  const balance = await balanceService.getBalance(userId);
   
   res.status(200).json({
     success: true,
@@ -60,8 +60,8 @@ const getUserMovements = asyncHandler(async (req, res) => {
     });
   }
   
-  // Validar parámetros de consulta
-  const filters = validate(querySchemas.movementFilters, req.query);
+  // Validar parámetros de consulta (usa Movement listFilters)
+  const filters = validate(movementSchemas.listFilters, req.query);
   
   Logger.info(`Consultando movimientos de usuario ${userId}`, {
     requested_by: req.user.email,
@@ -230,7 +230,7 @@ const getDashboardSummary = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-  getUserBalance,
+  getBalance,
   getUserMovements,
   getBalancesSummary,
   getBalanceStats,

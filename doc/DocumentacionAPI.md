@@ -81,34 +81,206 @@ RELACIONES:
 | Método | Endpoint | Descripción | Rol |
 |--------|----------|-------------|-----|
 | `PATCH` | `/auctions/:id/competition-result` | Registrar resultado competencia BOB | Admin |
-| `GET` | `/auctions/:id/competition-status` | Ver estado de competencia | Admin |
 
 ### **FACTURACIÓN**
 
 | Método | Endpoint | Descripción | Rol |
 |--------|----------|-------------|-----|
-| `POST` | `/billing` | Completar datos facturación (cliente ganador) | Cliente |
-| `GET` | `/billing` | Listar facturas generadas | Admin |
-| `GET` | `/billing/:id` | Detalle de factura específica | Ambos |
+| `POST` | `/billing` | Completar datos de facturación para subasta ganada | Cliente |
+
+#### POST /billing
+
+Request (JSON):
+```json
+{
+  "auction_id": "cmxxxx...",
+  "billing_document_type": "DNI",
+  "billing_document_number": "12345678",
+  "billing_name": "Juan Carlos"
+}
+```
+
+Response Success (201):
+```json
+{
+  "success": true,
+  "data": {
+    "billing": {
+      "id": "cmxxxx...",
+      "monto": 960.0,
+      "moneda": "USD",
+      "concepto": "Compra vehículo Toyota Yaris 2020 - Subasta #123",
+      "created_at": "2024-01-21T12:00:00Z"
+    },
+    "auction_updated": {
+      "id": "cmxxxx...",
+      "estado": "facturada"
+    }
+  },
+  "message": "Facturación completada exitosamente"
+}
+```
+
+Notas:
+- Reglas: subasta debe estar en estado ganada; cliente debe ser el ganador.
+- Efecto: cambia Auction.estado a facturada y recalcula cache de saldo_retenido (pasa a 0).
+- Notificaciones: se generan para cliente (facturacion_completada) y admin (billing_generado).
 
 ### **REEMBOLSOS**
 
 | Método | Endpoint | Descripción | Rol |
 |--------|----------|-------------|-----|
-| `POST` | `/refunds` | Solicitar reembolso | Cliente |
-| `GET` | `/refunds` | Listar solicitudes (admin: todas, cliente: propias) | Ambos |
-| `GET` | `/refunds/:id` | Detalle de solicitud específica | Ambos |
-| `PATCH` | `/refunds/:id/confirm` | Confirmar solicitud telefónicamente | Admin |
-| `PATCH` | `/refunds/:id/reject` | Rechazar solicitud | Admin |
+| `POST` | `/refunds` | Crear solicitud de reembolso | Cliente |
+| `PATCH` | `/refunds/:id/manage` | Confirmar o rechazar solicitud | Admin |
 | `PATCH` | `/refunds/:id/process` | Procesar reembolso confirmado | Admin |
+
+#### POST /refunds
+Request (JSON):
+```json
+{
+  "monto_solicitado": 150.0,
+  "tipo_reembolso": "devolver_dinero",
+  "motivo": "No se ganó la competencia externa"
+}
+```
+
+Response (201):
+```json
+{
+  "success": true,
+  "data": {
+    "refund": {
+      "id": "cmxxxx...",
+      "user_id": "cmuser...",
+      "monto_solicitado": "150",
+      "tipo_reembolso": "devolver_dinero",
+      "estado": "solicitado",
+      "fecha_solicitud": "2024-01-21T12:00:00Z"
+    }
+  },
+  "message": "Solicitud de reembolso creada exitosamente"
+}
+```
+
+#### PATCH /refunds/:id/manage
+Request (JSON):
+```json
+{ "estado": "confirmado", "motivo": "Llamada ok" }
+```
+- estado: "confirmado" | "rechazado"
+
+Response (200):
+```json
+{
+  "success": true,
+  "data": {
+    "refund": {
+      "id": "cmxxxx...",
+      "estado": "confirmado",
+      "fecha_respuesta_empresa": "2024-01-21T12:10:00Z"
+    }
+  },
+  "message": "Solicitud de reembolso confirmado"
+}
+```
+
+#### PATCH /refunds/:id/process
+- Caso mantener_saldo (JSON, sin archivo):
+```json
+{}
+```
+
+- Caso devolver_dinero (multipart/form-data):
+```
+tipo_transferencia=transferencia
+numero_operacion=OP-ABC12345
+voucher=(file opcional: JPG/PNG/PDF)
+```
+
+Response (200):
+```json
+{
+  "success": true,
+  "data": {
+    "refund": {
+      "id": "cmxxxx...",
+      "estado": "procesado",
+      "fecha_procesamiento": "2024-01-21T12:20:00Z"
+    },
+    "movement": {
+      "id": "cmov...",
+      "tipo_movimiento_general": "salida",
+      "tipo_movimiento_especifico": "reembolso",
+      "monto": "150",
+      "estado": "validado",
+      "created_at": "2024-01-21T12:19:00Z"
+    }
+  },
+  "message": "Reembolso procesado correctamente"
+}
+```
+
+Notas:
+- El Movement se crea al procesar, no al solicitar.
+- Se recalculan automáticamente los caches de saldo_total y saldo_retenido.
 
 ### **NOTIFICACIONES**
 
 | Método | Endpoint | Descripción | Rol |
 |--------|----------|-------------|-----|
-| `GET` | `/notifications` | Listar notificaciones del usuario | Ambos |
-| `PATCH` | `/notifications/mark-read` | Marcar notificaciones como leídas | Ambos |
-| `GET` | `/notifications/unread-count` | Contador de no leídas | Ambos |
+| `GET` | `/notifications` | Listar notificaciones (admin: global con filtros; cliente: propias) | Ambos |
+| `PATCH` | `/notifications/mark-all-read` | Marcar todas las notificaciones del usuario como leídas | Ambos |
+| `PATCH` | `/notifications/:id/read` | Marcar una notificación específica como leída | Ambos |
+
+#### GET /notifications
+Query params:
+- estado, tipo, fecha_desde, fecha_hasta, page, limit
+- admin: user_id (opcional), search (titulo/mensaje)
+
+Response (200):
+```json
+{
+  "success": true,
+  "data": {
+    "notifications": [
+      {
+        "id": "cmnotif...",
+        "user_id": "cmuser...",
+        "tipo": "pago_validado",
+        "titulo": "Pago de garantía aprobado",
+        "mensaje": "Tu pago de garantía fue validado...",
+        "estado": "pendiente",
+        "email_status": "enviado",
+        "reference_type": "movement",
+        "reference_id": "cmov...",
+        "created_at": "2024-01-21T12:00:00Z",
+        "email_sent_at": "2024-01-21T12:01:00Z"
+      }
+    ],
+    "pagination": { "page": 1, "limit": 20, "total": 35, "total_pages": 2 }
+  }
+}
+```
+
+#### PATCH /notifications/mark-all-read
+Response (200):
+```json
+{ "success": true, "data": { "updated": 7 }, "message": "Notificaciones marcadas como leídas" }
+```
+
+#### PATCH /notifications/:id/read
+Response (200):
+```json
+{
+  "success": true,
+  "data": { "notification": { "id": "cmnotif...", "estado": "vista", "fecha_vista": "2024-01-21T12:05:00Z" } },
+  "message": "Notificación marcada como leída"
+}
+```
+
+Notas:
+- Envío de email es best-effort y no bloquea la transacción.
+- Campo email_status: pendiente | enviado | fallido.
 
 ### **SALDOS Y MOVIMIENTOS**
 
@@ -553,7 +725,7 @@ RELACIONES:
 
 ---
 
-## 🔹 **MANEJO DE ERRORES Y CÓDIGOS DE ESTADO**
+## **MANEJO DE ERRORES Y CÓDIGOS DE ESTADO**
 
 ### **CÓDIGOS DE ÉXITO**
 

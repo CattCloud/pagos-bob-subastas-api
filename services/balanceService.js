@@ -1,9 +1,10 @@
 const { prisma } = require('../config/database');
-const { 
-  BusinessErrors, 
-  NotFoundError 
+const {
+  BusinessErrors,
+  NotFoundError,
+  ConflictError,
 } = require('../middleware/errorHandler');
-const { 
+const {
   businessCalculations,
   formatters,
   paginationHelpers,
@@ -11,372 +12,475 @@ const {
 const { Logger } = require('../middleware/logger');
 
 class BalanceService {
-  
   /**
-   * Obtener saldo de un usuario
+   * Obtener saldo de un usuario con la nueva fórmula:
+   * Saldo Disponible = saldo_total(User) - saldo_retenido(User) - SUM(Billing.monto)
    */
-  async getUserBalance(userId) {
+  async getBalance(userId) {
     Logger.info(`Consultando saldo del usuario ${userId}`);
-    
-    // Obtener o crear saldo del usuario
-    const balance = await prisma.userBalance.upsert({
-      where: { user_id: userId },
-      update: {}, // No actualizar nada, solo obtener
-      create: {
-        user_id: userId,
-        saldo_total: 0,
-        saldo_retenido: 0,
-        saldo_aplicado: 0,
-        saldo_en_reembolso: 0,
-        saldo_penalizado: 0,
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        document_type: true,
+        document_number: true,
+        saldo_total: true,
+        saldo_retenido: true,
+        updated_at: true,
       },
     });
-    
-    // Calcular saldo disponible
-    const saldo_disponible = businessCalculations.calculateAvailableBalance(balance);
-    
+
+    if (!user) {
+      throw new NotFoundError('Usuario');
+    }
+
+    // 3) Calcular saldo_aplicado desde Billing
+    const appliedAgg = await prisma.billing.aggregate({
+      _sum: { monto: true },
+      where: { user_id: userId },
+    });
+
+    const saldo_aplicado = Number(appliedAgg._sum.monto || 0);
+    const saldo_total = Number(user.saldo_total || 0);
+    const saldo_retenido = Number(user.saldo_retenido || 0);
+    const saldo_disponible = Number(
+      (saldo_total - saldo_retenido - saldo_aplicado).toFixed(2)
+    );
+
     return {
       user_id: userId,
-      saldo_total: balance.saldo_total,
-      saldo_retenido: balance.saldo_retenido,
-      saldo_aplicado: balance.saldo_aplicado,
-      saldo_en_reembolso: balance.saldo_en_reembolso,
-      saldo_penalizado: balance.saldo_penalizado,
+      user: {
+        name: formatters.fullName(user),
+        document: formatters.document(user.document_type, user.document_number),
+      },
+      saldo_total,
+      saldo_retenido,
+      saldo_aplicado,
       saldo_disponible,
-      updated_at: balance.updated_at,
+      updated_at: user.updated_at,
     };
   }
-  
+
   /**
-   * Obtener movimientos de un usuario
+   * Obtener movimientos de un usuario (Movement) con filtros
    */
   async getUserMovements(userId, filters = {}) {
-    const { 
-      tipo, 
-      fecha_desde, 
-      fecha_hasta, 
-      page = 1, 
-      limit = 20 
+    const {
+      tipo_especifico, // 'pago_garantia,reembolso,penalidad,ajuste_manual'
+      estado, // 'pendiente,validado,rechazado'
+      fecha_desde,
+      fecha_hasta,
+      page = 1,
+      limit = 20,
     } = filters;
-    
+
     const offset = paginationHelpers.calculateOffset(page, limit);
-    
-    Logger.info(`Consultando movimientos del usuario ${userId}`, { filters });
-    
-    // Construir filtros
+
+    Logger.info(`Consultando movements del usuario ${userId}`, { filters });
+
     const where = { user_id: userId };
-    
-    // Filtro por tipo de movimiento
-    if (tipo) {
-      const tipos = Array.isArray(tipo) ? tipo : tipo.split(',').map(t => t.trim());
-      where.tipo_movimiento = { in: tipos };
+
+    if (tipo_especifico) {
+      const tipos = Array.isArray(tipo_especifico)
+        ? tipo_especifico
+        : String(tipo_especifico).split(',').map((t) => t.trim());
+      where.tipo_movimiento_especifico = { in: tipos };
     }
-    
-    // Filtro por fechas
+
+    if (estado) {
+      const estados = Array.isArray(estado)
+        ? estado
+        : String(estado).split(',').map((s) => s.trim());
+      where.estado = { in: estados };
+    }
+
     if (fecha_desde || fecha_hasta) {
       where.created_at = {};
       if (fecha_desde) where.created_at.gte = new Date(fecha_desde);
       if (fecha_hasta) where.created_at.lte = new Date(fecha_hasta);
     }
-    
-    // Ejecutar consulta
+
     const [movements, total] = await Promise.all([
       prisma.movement.findMany({
         where,
+        include: { references: true },
         orderBy: { created_at: 'desc' },
         skip: offset,
         take: parseInt(limit),
       }),
       prisma.movement.count({ where }),
     ]);
-    
-    // Formatear movimientos con información adicional
-    const formattedMovements = await Promise.all(movements.map(async (movement) => {
-      let referenceInfo = null;
-      
-      // Obtener información adicional según el tipo de referencia
-      if (movement.reference_type === 'pago' && movement.reference_id) {
-        try {
-          const payment = await prisma.guaranteePayment.findUnique({
-            where: { id: movement.reference_id },
-            include: {
-              auction: {
-                include: { asset: true },
-              },
-            },
-          });
-          
-          if (payment) {
-            referenceInfo = {
-              type: 'pago',
-              payment_id: payment.id,
-              auction: {
-                id: payment.auction.id,
-                placa: payment.auction.asset.placa,
-                marca: payment.auction.asset.marca,
-                modelo: payment.auction.asset.modelo,
-              },
-              estado_pago: payment.estado,
-            };
-          }
-        } catch (error) {
-          Logger.warn(`Error obteniendo info de pago ${movement.reference_id}:`, error.message);
-        }
-      }
-      
-      if (movement.reference_type === 'subasta' && movement.reference_id) {
-        try {
-          const auction = await prisma.auction.findUnique({
-            where: { id: movement.reference_id },
-            include: { asset: true },
-          });
-          
-          if (auction) {
-            referenceInfo = {
-              type: 'subasta',
-              auction_id: auction.id,
-              placa: auction.asset.placa,
-              marca: auction.asset.marca,
-              modelo: auction.asset.modelo,
-              estado_subasta: auction.estado,
-            };
-          }
-        } catch (error) {
-          Logger.warn(`Error obteniendo info de subasta ${movement.reference_id}:`, error.message);
-        }
-      }
-      
+
+    const formattedMovements = movements.map((m) => {
+      const auctionRef = (m.references || []).find((r) => r.reference_type === 'auction');
+      const offerRef = (m.references || []).find((r) => r.reference_type === 'offer');
+      const refundRef = (m.references || []).find((r) => r.reference_type === 'refund');
+
       return {
-        id: movement.id,
-        tipo_movimiento: movement.tipo_movimiento,
-        monto: movement.monto,
-        descripcion: movement.descripcion,
-        reference_info: referenceInfo,
-        created_at: movement.created_at,
+        id: m.id,
+        tipo_movimiento_general: m.tipo_movimiento_general,
+        tipo_movimiento_especifico: m.tipo_movimiento_especifico,
+        monto: m.monto,
+        moneda: m.moneda,
+        estado: m.estado,
+        numero_operacion: m.numero_operacion,
+        fecha_pago: m.fecha_pago,
+        fecha_resolucion: m.fecha_resolucion,
+        motivo_rechazo: m.motivo_rechazo,
+        created_at: m.created_at,
+        references: {
+          auction_id: auctionRef?.reference_id || null,
+          offer_id: offerRef?.reference_id || null,
+          refund_id: refundRef?.reference_id || null,
+        },
       };
-    }));
-    
+    });
+
     const pagination = paginationHelpers.generatePaginationMeta(page, limit, total);
-    
+
     return { movements: formattedMovements, pagination };
   }
-  
+
   /**
-   * Obtener resumen de saldos para admin
+   * Resumen de saldos para admin (paginado)
+   * Usa cache en User + cálculo de aplicado desde Billing
    */
   async getBalancesSummary(filters = {}) {
     const { page = 1, limit = 20, search } = filters;
     const offset = paginationHelpers.calculateOffset(page, limit);
-    
+
     Logger.info('Consultando resumen de saldos para admin', { filters });
-    
-    // Construir filtros de búsqueda
+
     const where = {};
-    
+
     if (search) {
-      where.user = {
-        OR: [
-          { first_name: { contains: search, mode: 'insensitive' } },
-          { last_name: { contains: search, mode: 'insensitive' } },
-          { document_number: { contains: search, mode: 'insensitive' } },
-          { email: { contains: search, mode: 'insensitive' } },
-        ],
-      };
+      where.OR = [
+        { first_name: { contains: search, mode: 'insensitive' } },
+        { last_name: { contains: search, mode: 'insensitive' } },
+        { document_number: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ];
     }
-    
-    // Obtener balances con información de usuarios
-    const [balances, total] = await Promise.all([
-      prisma.userBalance.findMany({
+
+    const [users, total] = await Promise.all([
+      prisma.user.findMany({
         where,
-        include: {
-          user: {
-            select: {
-              id: true,
-              first_name: true,
-              last_name: true,
-              document_type: true,
-              document_number: true,
-              email: true,
-              phone_number: true,
-            },
-          },
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          document_type: true,
+          document_number: true,
+          email: true,
+          phone_number: true,
+          saldo_total: true,
+          saldo_retenido: true,
+          updated_at: true,
         },
         orderBy: { saldo_total: 'desc' },
         skip: offset,
         take: parseInt(limit),
       }),
-      prisma.userBalance.count({ where }),
+      prisma.user.count({ where }),
     ]);
-    
-    // Formatear resultados
-    const formattedBalances = balances.map(balance => {
-      const saldo_disponible = businessCalculations.calculateAvailableBalance(balance);
-      
-      return {
+
+    // Calcular saldo_aplicado por usuario (Billing)
+    const balances = [];
+    for (const u of users) {
+      const appliedAgg = await prisma.billing.aggregate({
+        _sum: { monto: true },
+        where: { user_id: u.id },
+      });
+      const saldo_aplicado = Number(appliedAgg._sum.monto || 0);
+      const saldo_total = Number(u.saldo_total || 0);
+      const saldo_retenido = Number(u.saldo_retenido || 0);
+      const saldo_disponible = Number(
+        (saldo_total - saldo_retenido - saldo_aplicado).toFixed(2)
+      );
+
+      balances.push({
         user: {
-          id: balance.user.id,
-          name: formatters.fullName(balance.user),
-          document: formatters.document(balance.user.document_type, balance.user.document_number),
-          email: balance.user.email,
-          phone: balance.user.phone_number,
+          id: u.id,
+          name: formatters.fullName(u),
+          document: formatters.document(u.document_type, u.document_number),
+          email: u.email,
+          phone: u.phone_number,
         },
         balance: {
-          saldo_total: balance.saldo_total,
-          saldo_retenido: balance.saldo_retenido,
-          saldo_aplicado: balance.saldo_aplicado,
-          saldo_en_reembolso: balance.saldo_en_reembolso,
-          saldo_penalizado: balance.saldo_penalizado,
+          saldo_total,
+          saldo_retenido,
+          saldo_aplicado,
           saldo_disponible,
         },
-        updated_at: balance.updated_at,
-      };
-    });
-    
+        updated_at: u.updated_at,
+      });
+    }
+
     const pagination = paginationHelpers.generatePaginationMeta(page, limit, total);
-    
-    return { balances: formattedBalances, pagination };
+    return { balances, pagination };
   }
-  
+
   /**
-   * Obtener estadísticas generales de saldos
+   * Estadísticas globales de saldos con nueva arquitectura
    */
   async getBalanceStats() {
-    Logger.info('Calculando estadísticas de saldos');
-    
-    // Obtener estadísticas agregadas
-    const stats = await prisma.userBalance.aggregate({
-      _sum: {
-        saldo_total: true,
-        saldo_retenido: true,
-        saldo_aplicado: true,
-        saldo_en_reembolso: true,
-        saldo_penalizado: true,
-      },
-      _count: {
-        id: true,
-      },
-    });
-    
-    // Calcular saldo disponible total
-    const saldo_disponible_total = (stats._sum.saldo_total || 0) - 
-                                  (stats._sum.saldo_retenido || 0) - 
-                                  (stats._sum.saldo_aplicado || 0) - 
-                                  (stats._sum.saldo_en_reembolso || 0) - 
-                                  (stats._sum.saldo_penalizado || 0);
-    
-    // Obtener usuarios con saldo positivo
-    const usersWithBalance = await prisma.userBalance.count({
-      where: {
-        saldo_total: {
-          gt: 0,
+    Logger.info('Calculando estadísticas de saldos (nueva arquitectura)');
+
+    const [userAgg, billingAgg, usersWithBalanceCount, movementsThisMonth] = await Promise.all([
+      prisma.user.aggregate({
+        _sum: {
+          saldo_total: true,
+          saldo_retenido: true,
         },
-      },
-    });
-    
-    // Obtener movimientos del mes actual
-    const currentMonth = new Date();
-    currentMonth.setDate(1);
-    currentMonth.setHours(0, 0, 0, 0);
-    
-    const movementsThisMonth = await prisma.movement.count({
-      where: {
-        created_at: {
-          gte: currentMonth,
-        },
-      },
-    });
-    
+        _count: { id: true },
+      }),
+      prisma.billing.aggregate({
+        _sum: { monto: true },
+      }),
+      prisma.user.count({
+        where: { saldo_total: { gt: 0 } },
+      }),
+      (async () => {
+        const currentMonth = new Date();
+        currentMonth.setDate(1);
+        currentMonth.setHours(0, 0, 0, 0);
+        return prisma.movement.count({
+          where: {
+            created_at: {
+              gte: currentMonth,
+            },
+          },
+        });
+      })(),
+    ]);
+
+    const saldo_total_sistema = Number(userAgg._sum.saldo_total || 0);
+    const saldo_retenido_total = Number(userAgg._sum.saldo_retenido || 0);
+    const saldo_aplicado_total = Number(billingAgg._sum.monto || 0);
+    const saldo_disponible_total = Number(
+      (saldo_total_sistema - saldo_retenido_total - saldo_aplicado_total).toFixed(2)
+    );
+
     return {
-      saldo_total_sistema: stats._sum.saldo_total || 0,
-      saldo_retenido_total: stats._sum.saldo_retenido || 0,
-      saldo_aplicado_total: stats._sum.saldo_aplicado || 0,
-      saldo_en_reembolso_total: stats._sum.saldo_en_reembolso || 0,
-      saldo_penalizado_total: stats._sum.saldo_penalizado || 0,
+      saldo_total_sistema,
+      saldo_retenido_total,
+      saldo_aplicado_total,
       saldo_disponible_total,
-      total_usuarios_con_saldo: usersWithBalance,
-      total_usuarios: stats._count.id,
+      total_usuarios_con_saldo: usersWithBalanceCount,
+      total_usuarios: userAgg._count.id,
       movimientos_mes_actual: movementsThisMonth,
     };
   }
-  
+
   /**
-   * Crear movimiento manual (para ajustes por admin)
+   * Crear ajuste manual como Movement validado (admin)
+   * - ajuste_positivo: entrada/ajuste_manual
+   * - ajuste_negativo: salida/ajuste_manual
+   * - penalidad_manual: salida/penalidad
    */
   async createManualMovement(userId, movementData, adminUserId) {
     const { tipo_movimiento, monto, descripcion, motivo } = movementData;
-    
+
     Logger.info(`Admin ${adminUserId} creando movimiento manual para usuario ${userId}`, {
       tipo: tipo_movimiento,
       monto,
       motivo,
     });
-    
-    const result = await prisma.$transaction(async (tx) => {
-      // Verificar que el usuario existe
+
+    if (typeof monto !== 'number' || monto <= 0) {
+      throw new ConflictError('El monto debe ser un número positivo', 'INVALID_AMOUNT');
+    }
+
+    return prisma.$transaction(async (tx) => {
       const user = await tx.user.findUnique({
-        where: { id: userId, user_type: 'client', deleted_at: null },
+        where: { id: userId, user_type: 'client' },
       });
-      
       if (!user) {
-        throw BusinessErrors.UserNotFound();
+        throw BusinessErrors.UserNotFound ? BusinessErrors.UserNotFound() : new NotFoundError('Usuario');
       }
-      
-      // Crear movimiento
+
+      let general = 'entrada';
+      let especifico = 'ajuste_manual';
+      let amount = Math.abs(monto);
+
+      switch (tipo_movimiento) {
+        case 'ajuste_positivo':
+          general = 'entrada';
+          especifico = 'ajuste_manual';
+          break;
+        case 'ajuste_negativo':
+          general = 'salida';
+          especifico = 'ajuste_manual';
+          break;
+        case 'penalidad_manual':
+          general = 'salida';
+          especifico = 'penalidad';
+          break;
+        default:
+          throw new ConflictError(
+            `Tipo de movimiento manual no válido: ${tipo_movimiento}`,
+            'INVALID_MANUAL_MOVEMENT_TYPE'
+          );
+      }
+
+      // Crear movement ya validado (afecta inmediatamente el saldo_total)
       const movement = await tx.movement.create({
         data: {
           user_id: userId,
-          tipo_movimiento,
-          monto,
-          descripcion: `${descripcion} - Ajuste manual realizado por admin`,
-          reference_type: 'ajuste_manual',
-          reference_id: adminUserId,
+          tipo_movimiento_general: general,
+          tipo_movimiento_especifico: especifico,
+          monto: amount,
+          moneda: 'USD',
+          tipo_pago: null,
+          numero_cuenta_origen: null,
+          voucher_url: null,
+          concepto: `${descripcion} - Ajuste manual${motivo ? ` (${motivo})` : ''}`,
+          estado: 'validado',
+          fecha_pago: new Date(),
+          fecha_resolucion: new Date(),
+          motivo_rechazo: null,
+          numero_operacion: null,
         },
       });
-      
-      // Actualizar saldo según el tipo de movimiento
-      let balanceUpdate = {};
-      
-      switch (tipo_movimiento) {
-        case 'ajuste_positivo':
-          balanceUpdate = { saldo_total: { increment: Math.abs(monto) } };
-          break;
-        case 'ajuste_negativo':
-          balanceUpdate = { saldo_total: { decrement: Math.abs(monto) } };
-          break;
-        case 'penalidad_manual':
-          balanceUpdate = { saldo_penalizado: { increment: Math.abs(monto) } };
-          break;
-        default:
-          throw new Error(`Tipo de movimiento manual no válido: ${tipo_movimiento}`);
-      }
-      
-      // Actualizar balance
-      const updatedBalance = await tx.userBalance.upsert({
-        where: { user_id: userId },
-        update: balanceUpdate,
-        create: {
-          user_id: userId,
-          saldo_total: tipo_movimiento === 'ajuste_positivo' ? Math.abs(monto) : 0,
-          saldo_retenido: 0,
-          saldo_aplicado: 0,
-          saldo_en_reembolso: 0,
-          saldo_penalizado: tipo_movimiento === 'penalidad_manual' ? Math.abs(monto) : 0,
+
+      // Referencia al propio usuario (opcional)
+      await tx.movementReference.create({
+        data: {
+          movement_id: movement.id,
+          reference_type: 'user',
+          reference_id: userId,
         },
       });
-      
+
+      // Recalcular cache de saldo_total y saldo_retenido
+      const saldo_total = await this._recalcularSaldoTotalTx(tx, userId);
+      const saldo_retenido = await this._recalcularSaldoRetenidoTx(tx, userId);
+
       return {
         movement,
-        updated_balance: updatedBalance,
+        updated_user_cache: {
+          saldo_total,
+          saldo_retenido,
+        },
         user: {
           name: formatters.fullName(user),
           document: formatters.document(user.document_type, user.document_number),
         },
       };
     });
-    
-    Logger.info(`Movimiento manual creado: ${result.movement.id} para ${result.user.name}`);
-    
-    return result;
+  }
+
+  // -----------------------
+  // Helpers internos de recálculo
+  // -----------------------
+
+  /**
+   * Recalcula y actualiza User.saldo_total = sum(entradas validadas) - sum(salidas validadas)
+   */
+  async _recalcularSaldoTotalTx(tx, userId) {
+    const entradas = await tx.movement.aggregate({
+      _sum: { monto: true },
+      where: {
+        user_id: userId,
+        estado: 'validado',
+        tipo_movimiento_general: 'entrada',
+      },
+    });
+    const salidas = await tx.movement.aggregate({
+      _sum: { monto: true },
+      where: {
+        user_id: userId,
+        estado: 'validado',
+        tipo_movimiento_general: 'salida',
+      },
+    });
+
+    const totalEntradas = Number(entradas._sum.monto || 0);
+    const totalSalidas = Number(salidas._sum.monto || 0);
+    const saldoTotal = Number((totalEntradas - totalSalidas).toFixed(2));
+
+    await tx.user.update({
+      where: { id: userId },
+      data: { saldo_total: saldoTotal },
+    });
+
+    return saldoTotal;
+  }
+
+  /**
+   * Recalcula y actualiza User.saldo_retenido.
+   * Regla RN07:
+   *   - Retenemos garantías validadas de subastas en estados: ['finalizada','ganada','perdida','penalizada'].
+   *   - 'facturada' NO retiene.
+   *   - La retención efectiva se reduce por reembolsos ya procesados (salida/reembolso validados).
+   */
+  async _recalcularSaldoRetenidoTx(tx, userId) {
+    // 1) Subastas del usuario con estado
+    const offers = await tx.offer.findMany({
+      where: { user_id: userId },
+      select: {
+        auction: { select: { id: true, estado: true } },
+      },
+    });
+
+    const retenedorStates = new Set(['finalizada', 'ganada', 'perdida']);
+    const auctionIdsToRetain = offers
+      .filter((o) => o.auction && retenedorStates.has(o.auction.estado))
+      .map((o) => o.auction.id);
+
+    // 2) Sumar garantías validadas ligadas a esas subastas
+    let sumGarantias = 0;
+    if (auctionIdsToRetain.length > 0) {
+      const validatedGuaranteeMovs = await tx.movement.findMany({
+        where: {
+          user_id: userId,
+          estado: 'validado',
+          tipo_movimiento_general: 'entrada',
+          tipo_movimiento_especifico: 'pago_garantia',
+          references: {
+            some: {
+              reference_type: 'auction',
+              reference_id: { in: auctionIdsToRetain },
+            },
+          },
+        },
+        select: { monto: true },
+      });
+      sumGarantias = validatedGuaranteeMovs.reduce((acc, m) => acc + Number(m.monto || 0), 0);
+    }
+
+    // 3) Restar reembolsos ya procesados (salida/reembolso validados) SOLO de estas subastas
+    let sumReembolsos = 0;
+    if (auctionIdsToRetain.length > 0) {
+      const refundMovs = await tx.movement.findMany({
+        where: {
+          user_id: userId,
+          estado: 'validado',
+          tipo_movimiento_general: 'salida',
+          tipo_movimiento_especifico: 'reembolso',
+          references: {
+            some: {
+              reference_type: 'auction',
+              reference_id: { in: auctionIdsToRetain },
+            },
+          },
+        },
+        select: { monto: true },
+      });
+      sumReembolsos = refundMovs.reduce((acc, m) => acc + Number(m.monto || 0), 0);
+    }
+
+    const saldoRetenido = Number(Math.max(0, sumGarantias - sumReembolsos).toFixed(2));
+
+    await tx.user.update({
+      where: { id: userId },
+      data: { saldo_retenido: saldoRetenido },
+    });
+
+    return saldoRetenido;
   }
 }
 

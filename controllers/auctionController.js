@@ -128,6 +128,29 @@ const extendPaymentDeadline = asyncHandler(async (req, res) => {
     message: 'Plazo de pago extendido exitosamente',
   });
 });
+/**
+ * Registrar resultado de competencia externa
+ * PATCH /api/auctions/:id/competition-result
+ */
+const registerCompetitionResult = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  // Validar datos de entrada
+  const { resultado, observaciones } = validate(auctionSchemas.competitionResult, req.body);
+
+  Logger.info(`Admin ${req.user.email} registrando resultado de competencia para subasta ${id}`, {
+    resultado,
+    observaciones,
+  });
+
+  const result = await auctionService.registerCompetitionResult(id, resultado, observaciones || null);
+
+  res.status(200).json({
+    success: true,
+    data: result,
+    message: 'Resultado de competencia registrado',
+  });
+});
 
 /**
  * Eliminar subasta
@@ -221,4 +244,5 @@ module.exports = {
   deleteAuction,
   getAuctionStats,
   getExpiredAuctions,
+  registerCompetitionResult,
 };

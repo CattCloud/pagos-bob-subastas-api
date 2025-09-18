@@ -19,19 +19,8 @@ async function main() {
     },
   });
 
-  // Crear balance para admin (aunque no se use)
-  await prisma.userBalance.upsert({
-    where: { user_id: admin.id },
-    update: {},
-    create: {
-      user_id: admin.id,
-      saldo_total: 0,
-      saldo_retenido: 0,
-      saldo_aplicado: 0,
-      saldo_en_reembolso: 0,
-      saldo_penalizado: 0,
-    },
-  });
+  // Cache de saldos ahora vive en User (saldo_total, saldo_retenido). No se usa tabla legacy de balances.
+  // No es necesario crear registros adicionales para admin.
 
   // Crear algunos usuarios de prueba para desarrollo
   if (process.env.NODE_ENV === 'development') {
@@ -74,19 +63,7 @@ async function main() {
         create: userData,
       });
 
-      // Crear balance para cada usuario
-      await prisma.userBalance.upsert({
-        where: { user_id: user.id },
-        update: {},
-        create: {
-          user_id: user.id,
-          saldo_total: 0,
-          saldo_retenido: 0,
-          saldo_aplicado: 0,
-          saldo_en_reembolso: 0,
-          saldo_penalizado: 0,
-        },
-      });
+      // Los campos de cache (saldo_total, saldo_retenido) se mantienen en User con default 0.
 
       console.log(`✅ Usuario creado: ${user.first_name} ${user.last_name} (${user.document_type}: ${user.document_number})`);
     }

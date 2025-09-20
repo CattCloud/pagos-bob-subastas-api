@@ -30,7 +30,7 @@ const baseSchemas = {
   userType: Joi.string().valid('admin', 'client'),
   auctionStatus: Joi.string().valid('activa', 'pendiente', 'en_validacion', 'finalizada', 'vencida', 'cancelada', 'ganada', 'facturada', 'perdida', 'penalizada'),
   paymentStatus: Joi.string().valid('pendiente', 'validado', 'rechazado'),
-  offerStatus: Joi.string().valid('activa', 'ganadora', 'perdedora'),
+  guaranteeStatus: Joi.string().valid('activa', 'ganadora', 'perdedora'),
   refundStatus: Joi.string().valid('solicitado', 'confirmado', 'rechazado', 'procesado', 'cancelado'),
 
   // IDs
@@ -82,8 +82,6 @@ const userSchemas = {
 // SUBASTAS
 const auctionSchemas = {
   createAuction: Joi.object({
-    fecha_inicio: baseSchemas.futureDatetime.required(),
-    fecha_fin: baseSchemas.futureDatetime.required().greater(Joi.ref('fecha_inicio')),
     asset: Joi.object({
       placa: Joi.string().pattern(/^[A-Z0-9-]{6,10}$/).required().messages({
         'string.pattern.base': 'Placa debe tener formato válido (ej: ABC-123)',
@@ -110,18 +108,16 @@ const auctionSchemas = {
   }),
 };
 
-// OFERTAS
-const offerSchemas = {
+// GARANTÍAS
+const guaranteeSchemas = {
   createWinner: Joi.object({
     user_id: baseSchemas.cuid.required(),
     monto_oferta: baseSchemas.currency.required(),
-    fecha_oferta: baseSchemas.datetime.required(),
     fecha_limite_pago: baseSchemas.futureDatetime.optional(),
   }),
   reassignWinner: Joi.object({
     user_id: baseSchemas.cuid.required(),
     monto_oferta: baseSchemas.currency.required(),
-    fecha_oferta: baseSchemas.datetime.required(),
     motivo_reasignacion: Joi.string().max(200).optional(),
   }),
 };
@@ -262,12 +258,26 @@ const querySchemas = {
     ).optional(),
     search: Joi.string().max(100).optional(),
   }).concat(pagination).concat(dateRange),
+  refundFilters: Joi.object({
+    estado: Joi.alternatives().try(
+      baseSchemas.refundStatus,
+      Joi.string().custom((value) => value.split(',').map(s => s.trim()))
+    ).optional(),
+    user_id: baseSchemas.cuid.optional(),
+    auction_id: baseSchemas.cuid.optional(),
+  }).concat(pagination).concat(dateRange),
+  userFilters: Joi.object({
+    search: Joi.string().max(100).optional(),
+    document_type: baseSchemas.documentType.optional(),
+    user_type: baseSchemas.userType.optional(),
+  }).concat(pagination),
 };
 
 // Función helper
 const validate = (schema, data, options = {}) => {
   const { error, value } = schema.validate(data, {
     abortEarly: false,
+    allowUnknown: true,
     stripUnknown: true,
     ...options,
   });
@@ -293,7 +303,7 @@ module.exports = {
   baseSchemas,
   userSchemas,
   auctionSchemas,
-  offerSchemas,
+  guaranteeSchemas,
   billingSchemas,
   refundSchemas,
   querySchemas,

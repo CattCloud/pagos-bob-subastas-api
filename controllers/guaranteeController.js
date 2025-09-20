@@ -1,29 +1,29 @@
-const offerService = require('../services/offerService');
+const guaranteeService = require('../services/guaranteeService');
 const { 
   asyncHandler 
 } = require('../middleware/errorHandler');
 const { 
-  validations: { offerSchemas, querySchemas, validate } 
+  validations: { guaranteeSchemas, querySchemas, validate } 
 } = require('../utils');
 const { Logger } = require('../middleware/logger');
 
 /**
- * Registrar ganador de subasta
+ * Registrar ganador de subasta (Guarantee)
  * POST /api/auctions/:id/winner
  */
 const createWinner = asyncHandler(async (req, res) => {
   const { id: auctionId } = req.params;
   
   // Validar datos de entrada
-  const winnerData = validate(offerSchemas.createWinner, req.body);
+  const winnerData = validate(guaranteeSchemas.createWinner, req.body);
   
-  Logger.info(`Admin ${req.user.email} registrando ganador para subasta ${auctionId}`, {
+  Logger.info(`Admin ${req.user.email} registrando ganador (guarantee) para subasta ${auctionId}`, {
     winner_user_id: winnerData.user_id,
     monto_oferta: winnerData.monto_oferta,
   });
   
   // Registrar ganador usando el servicio
-  const result = await offerService.createWinner(auctionId, winnerData);
+  const result = await guaranteeService.createWinner(auctionId, winnerData);
   
   res.status(201).json({
     success: true,
@@ -33,22 +33,22 @@ const createWinner = asyncHandler(async (req, res) => {
 });
 
 /**
- * Reasignar ganador de subasta
+ * Reasignar ganador de subasta (Guarantee)
  * POST /api/auctions/:id/reassign-winner
  */
 const reassignWinner = asyncHandler(async (req, res) => {
   const { id: auctionId } = req.params;
   
   // Validar datos de entrada
-  const reassignData = validate(offerSchemas.reassignWinner, req.body);
+  const reassignData = validate(guaranteeSchemas.reassignWinner, req.body);
   
-  Logger.warn(`Admin ${req.user.email} reasignando ganador para subasta ${auctionId}`, {
+  Logger.warn(`Admin ${req.user.email} reasignando ganador (guarantee) para subasta ${auctionId}`, {
     new_winner_user_id: reassignData.user_id,
     motivo: reassignData.motivo_reasignacion,
   });
   
   // Reasignar ganador usando el servicio
-  const result = await offerService.reassignWinner(auctionId, reassignData);
+  const result = await guaranteeService.reassignWinner(auctionId, reassignData);
   
   res.status(200).json({
     success: true,
@@ -58,7 +58,7 @@ const reassignWinner = asyncHandler(async (req, res) => {
 });
 
 /**
- * Obtener subastas ganadas por cliente
+ * Obtener subastas ganadas por cliente (según Guarantees)
  * GET /api/users/:userId/won-auctions
  */
 const getWonAuctionsByUser = asyncHandler(async (req, res) => {
@@ -84,13 +84,13 @@ const getWonAuctionsByUser = asyncHandler(async (req, res) => {
     filters.estado = req.query.estado.split(',').map(s => s.trim());
   }
   
-  Logger.info(`Consultando subastas ganadas por usuario ${userId}`, {
+  Logger.info(`Consultando subastas ganadas por usuario ${userId} (guarantees)`, {
     requested_by: req.user.email,
     filters,
   });
   
   // Obtener subastas ganadas usando el servicio
-  const result = await offerService.getWonAuctionsByUser(userId, filters);
+  const result = await guaranteeService.getWonAuctionsByUser(userId, filters);
   
   res.status(200).json({
     success: true,
@@ -117,12 +117,12 @@ const canUserParticipate = asyncHandler(async (req, res) => {
     });
   }
   
-  Logger.info(`Verificando elegibilidad de participación para usuario ${userId}`, {
+  Logger.info(`Verificando elegibilidad de participación (guarantees) para usuario ${userId}`, {
     requested_by: req.user.email,
   });
   
   // Verificar elegibilidad usando el servicio
-  const result = await offerService.canUserParticipate(userId);
+  const result = await guaranteeService.canUserParticipate(userId);
   
   res.status(200).json({
     success: true,
@@ -134,25 +134,18 @@ const canUserParticipate = asyncHandler(async (req, res) => {
 });
 
 /**
- * Obtener estadísticas de ofertas para dashboard admin
- * GET /api/offers/stats
+ * Obtener estadísticas de garantías para dashboard admin
+ * GET /api/guarantees/stats
  */
-const getOfferStats = asyncHandler(async (req, res) => {
-  Logger.info(`Admin ${req.user.email} consultando estadísticas de ofertas`);
+const getGuaranteeStats = asyncHandler(async (req, res) => {
+  Logger.info(`Admin ${req.user.email} consultando estadísticas de garantías`);
   
-  // Obtener estadísticas usando consultas directas
-  const stats = await Promise.all([
-    // Ofertas activas (ganadores pendientes de pago)
-    offerService.getWonAuctionsByUser(null, { estado: ['activa'], limit: 1 }),
-    // Total de ofertas ganadoras procesadas este mes
-    // Esto sería una consulta más compleja que implementaríamos después
-  ]);
-  
+  // Placeholder: se puede implementar una agregación específica
   const statistics = {
-    ofertas_activas: 0, // Placeholder - requiere consulta más específica
-    ofertas_procesadas_mes: 0, // Placeholder
-    reasignaciones_mes: 0, // Placeholder
-    penalidades_aplicadas_mes: 0, // Placeholder
+    garantias_activas: 0,
+    garantias_procesadas_mes: 0,
+    reasignaciones_mes: 0,
+    penalidades_aplicadas_mes: 0,
   };
   
   res.status(200).json({
@@ -170,5 +163,5 @@ module.exports = {
   reassignWinner,
   getWonAuctionsByUser,
   canUserParticipate,
-  getOfferStats,
+  getGuaranteeStats,
 };

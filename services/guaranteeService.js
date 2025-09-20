@@ -11,15 +11,15 @@ const {
 } = require('../utils');
 const { Logger } = require('../middleware/logger');
 
-class OfferService {
+class GuaranteeService {
   
   /**
-   * Registrar ganador de subasta
+   * Registrar ganador de subasta (crea Guarantee)
    */
   async createWinner(auctionId, winnerData) {
-    const { user_id, monto_oferta, fecha_oferta, fecha_limite_pago } = winnerData;
+    const { user_id, monto_oferta, fecha_limite_pago } = winnerData;
     
-    Logger.info(`Registrando ganador para subasta ${auctionId}`, {
+    Logger.info(`Registrando ganador (guarantee) para subasta ${auctionId}`, {
       user_id,
       monto_oferta,
     });
@@ -49,27 +49,20 @@ class OfferService {
         throw BusinessErrors.UserNotFound();
       }
       
-      // Validar que la fecha de oferta esté dentro del rango de la subasta
-      if (!businessValidations.isOfferDateValid(fecha_oferta, auction.fecha_inicio, auction.fecha_fin)) {
-        throw new ConflictError(
-          'La fecha de la oferta debe estar entre las fechas de inicio y fin de la subasta',
-          'INVALID_OFFER_DATE'
-        );
-      }
+      // Validación de rango de fechas eliminada: la subasta ya no tiene fecha_inicio/fecha_fin
       
       // Calcular monto de garantía
       const monto_garantia = businessCalculations.calculateGuaranteeAmount(monto_oferta);
       
-      // Crear oferta como ganadora
-      const offer = await tx.offer.create({
+      // Crear garantía (ganador)
+      const guarantee = await tx.guarantee.create({
         data: {
           auction_id: auctionId,
           user_id: user_id,
           monto_oferta: monto_oferta,
-          fecha_oferta: new Date(fecha_oferta),
           posicion_ranking: 1,
-          fecha_asignacion_ganador: new Date(),
           estado: 'activa',
+          fecha_limite_pago: fecha_limite_pago ? new Date(fecha_limite_pago) : null,
         },
       });
       
@@ -78,18 +71,21 @@ class OfferService {
         where: { id: auctionId },
         data: {
           estado: 'pendiente',
-          id_offerWin: offer.id,
-          fecha_limite_pago: fecha_limite_pago ? new Date(fecha_limite_pago) : null,
+          id_offerWin: guarantee.id, // mantenemos nombre de campo
         },
         include: { asset: true },
       });
       
       return {
-        offer: {
-          ...offer,
+        guarantee: {
+          ...guarantee,
           monto_garantia,
         },
-        auction: updatedAuction,
+        // Compatibilidad: exponer fecha_limite_pago a nivel de auction como campo calculado
+        auction: {
+          ...updatedAuction,
+          fecha_limite_pago: guarantee.fecha_limite_pago || null,
+        },
         user: {
           id: user.id,
           name: formatters.fullName(user),
@@ -98,7 +94,7 @@ class OfferService {
       };
     });
     
-    Logger.info(`Ganador registrado exitosamente: ${result.user.name} - Subasta ${auctionId}`);
+    Logger.info(`Ganador (guarantee) registrado: ${result.user.name} - Subasta ${auctionId}`);
     
     return result;
   }
@@ -107,9 +103,9 @@ class OfferService {
    * Reasignar ganador cuando el actual no paga
    */
   async reassignWinner(auctionId, newWinnerData) {
-    const { user_id, monto_oferta, fecha_oferta, motivo_reasignacion } = newWinnerData;
+    const { user_id, monto_oferta, motivo_reasignacion } = newWinnerData;
     
-    Logger.info(`Reasignando ganador para subasta ${auctionId}`, {
+    Logger.info(`Reasignando ganador (guarantee) para subasta ${auctionId}`, {
       new_user_id: user_id,
       motivo: motivo_reasignacion,
     });
@@ -120,7 +116,7 @@ class OfferService {
         where: { id: auctionId },
         include: {
           asset: true,
-          offers: {
+          guarantees: {
             where: { estado: 'activa' },
             include: { user: true },
           },
@@ -136,11 +132,11 @@ class OfferService {
         throw BusinessErrors.InvalidAuctionState('pendiente, en_validacion o vencida', auction.estado);
       }
       
-      // Obtener oferta ganadora actual
-      const currentWinningOffer = auction.offers.find(offer => offer.id === auction.id_offerWin);
+      // Obtener garantía ganadora actual
+      const currentWinningGuarantee = auction.guarantees.find(g => g.id === auction.id_offerWin);
       
-      if (!currentWinningOffer) {
-        throw new ConflictError('No se encontró oferta ganadora actual para reasignar', 'NO_CURRENT_WINNER');
+      if (!currentWinningGuarantee) {
+        throw new ConflictError('No se encontró garantía ganadora actual para reasignar', 'NO_CURRENT_WINNER');
       }
       
       // Verificar que el nuevo usuario existe y es diferente al actual
@@ -152,29 +148,28 @@ class OfferService {
         throw BusinessErrors.UserNotFound();
       }
       
-      if (currentWinningOffer.user_id === user_id) {
+      if (currentWinningGuarantee.user_id === user_id) {
         throw new ConflictError('El nuevo ganador no puede ser el mismo que el actual', 'SAME_USER');
       }
       
-      // Aplicar penalidad al ganador anterior si corresponde
-      const penaltyApplied = null; // Penalidad solo aplica cuando estado 'penalizada' según nueva arquitectura
+      // Penalidad solo aplica en otra etapa (según reglas actuales)
+      const penaltyApplied = null;
       
-      // Marcar oferta anterior como perdedora
-      await tx.offer.update({
-        where: { id: currentWinningOffer.id },
+      // Marcar garantía anterior como perdedora
+      await tx.guarantee.update({
+        where: { id: currentWinningGuarantee.id },
         data: { estado: 'perdedora' },
       });
       
-      // Crear nueva oferta ganadora
-      const newOffer = await tx.offer.create({
+      // Crear nueva garantía ganadora
+      const newGuarantee = await tx.guarantee.create({
         data: {
           auction_id: auctionId,
           user_id: user_id,
           monto_oferta: monto_oferta,
-          fecha_oferta: new Date(fecha_oferta),
           posicion_ranking: 1,
-          fecha_asignacion_ganador: new Date(),
           estado: 'activa',
+          fecha_limite_pago: null,
         },
       });
       
@@ -183,8 +178,7 @@ class OfferService {
         where: { id: auctionId },
         data: {
           estado: 'pendiente',
-          id_offerWin: newOffer.id,
-          fecha_limite_pago: null, // Resetear fecha límite para nuevo ganador
+          id_offerWin: newGuarantee.id,
         },
         include: { asset: true },
       });
@@ -192,13 +186,17 @@ class OfferService {
       const monto_garantia = businessCalculations.calculateGuaranteeAmount(monto_oferta);
       
       return {
-        new_offer: {
-          ...newOffer,
+        new_guarantee: {
+          ...newGuarantee,
           monto_garantia,
         },
-        auction: updatedAuction,
+        // Compatibilidad: exponer fecha_limite_pago calculado desde la nueva garantía
+        auction: {
+          ...updatedAuction,
+          fecha_limite_pago: newGuarantee.fecha_limite_pago || null,
+        },
         previous_winner: {
-          name: formatters.fullName(currentWinningOffer.user),
+          name: formatters.fullName(currentWinningGuarantee.user),
           penalty_applied: penaltyApplied,
         },
         new_winner: {
@@ -209,7 +207,7 @@ class OfferService {
       };
     });
     
-    Logger.info(`Ganador reasignado exitosamente: ${result.new_winner.name} - Subasta ${auctionId}`);
+    Logger.info(`Ganador (guarantee) reasignado: ${result.new_winner.name} - Subasta ${auctionId}`);
     
     return result;
   }
@@ -227,14 +225,14 @@ class OfferService {
       posicion_ranking: 1,
     };
     
-    // Filtrar por estado de oferta
+    // Filtrar por estado de guarantee
     if (estado) {
       where.estado = { in: Array.isArray(estado) ? estado : [estado] };
     }
     
-    // Obtener ofertas ganadoras del usuario
-    const [offers, total] = await Promise.all([
-      prisma.offer.findMany({
+    // Obtener garantías ganadoras del usuario
+    const [guarantees, total] = await Promise.all([
+      prisma.guarantee.findMany({
         where,
         include: {
           auction: {
@@ -243,16 +241,16 @@ class OfferService {
             },
           },
         },
-        orderBy: { fecha_asignacion_ganador: 'desc' },
+        orderBy: { created_at: 'desc' },
         skip: offset,
         take: parseInt(limit),
       }),
-      prisma.offer.count({ where }),
+      prisma.guarantee.count({ where }),
     ]);
     
     // Formatear resultados
-    const wonAuctions = await Promise.all(offers.map(async (offer) => {
-      const monto_garantia = businessCalculations.calculateGuaranteeAmount(offer.monto_oferta);
+    const wonAuctions = await Promise.all(guarantees.map(async (guarantee) => {
+      const monto_garantia = businessCalculations.calculateGuaranteeAmount(guarantee.monto_oferta);
 
       // Buscar movement de pago_garantia para esta subasta y usuario
       const paymentMovement = await prisma.movement.findFirst({
@@ -263,7 +261,7 @@ class OfferService {
           references: {
             some: {
               reference_type: 'auction',
-              reference_id: offer.auction.id,
+              reference_id: guarantee.auction.id,
             },
           },
         },
@@ -271,21 +269,18 @@ class OfferService {
       });
 
       return {
-        offer_id: offer.id,
+        guarantee_id: guarantee.id,
         auction: {
-          id: offer.auction.id,
-          estado: offer.auction.estado,
-          fecha_inicio: offer.auction.fecha_inicio,
-          fecha_fin: offer.auction.fecha_fin,
-          fecha_limite_pago: offer.auction.fecha_limite_pago,
-          asset: offer.auction.asset,
+          id: guarantee.auction.id,
+          estado: guarantee.auction.estado,
+          // Compatibilidad: la fecha límite ahora vive en Guarantee
+          fecha_limite_pago: guarantee.fecha_limite_pago || null,
+          asset: guarantee.auction.asset,
         },
-        offer_details: {
-          monto_oferta: offer.monto_oferta,
+        guarantee_details: {
+          monto_oferta: guarantee.monto_oferta,
           monto_garantia,
-          fecha_oferta: offer.fecha_oferta,
-          fecha_asignacion: offer.fecha_asignacion_ganador,
-          estado: offer.estado,
+          estado: guarantee.estado,
         },
         payment_status: paymentMovement ? {
           has_payment: true,
@@ -315,7 +310,7 @@ class OfferService {
    */
   async canUserParticipate(userId) {
     // Verificar que no tenga pagos pendientes
-    const pendingPayments = await prisma.offer.count({
+    const pendingPayments = await prisma.guarantee.count({
       where: {
         user_id: userId,
         estado: 'activa',
@@ -333,4 +328,4 @@ class OfferService {
   }
 }
 
-module.exports = new OfferService();
+module.exports = new GuaranteeService();

@@ -76,8 +76,27 @@ const processRefund = [
   }),
 ];
 
+// GET /refunds — Listar solicitudes de reembolso (Admin ve todas; Cliente solo las propias)
+const listRefunds = asyncHandler(async (req, res) => {
+  const filters = validate(querySchemas.refundFilters, req.query);
+  
+  Logger.info(`Listando refunds`, {
+    requested_by: req.user.email,
+    role: req.user.user_type,
+    filters,
+  });
+  
+  const result = await refundService.listRefunds(req.user, filters);
+  
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
 module.exports = {
   createRefund,
   manageRefund,
   processRefund,
+  listRefunds,
 };

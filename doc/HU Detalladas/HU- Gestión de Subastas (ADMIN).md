@@ -13,9 +13,6 @@ Como **administrador**, quiero registrar una nueva subasta y el activo asociado 
 ### **Condiciones Funcionales:**
 
 - **CA-01:** Debe mostrar formulario dividido en secciones:
-    - **Datos de la Subasta:**
-        - `fecha_inicio` (datetime) *obligatorio*
-        - `fecha_fin` (datetime) *obligatorio*
     - **Datos del Activo:**
         - `placa` (texto) *obligatorio*
         - `empresa_propietaria` (texto) *obligatorio*
@@ -33,8 +30,6 @@ Como **administrador**, quiero registrar una nueva subasta y el activo asociado 
 
 ### **Validaciones de Negocio**
 
-- **CA-05:** `fecha_inicio` debe ser mayor a fecha/hora actual
-- **CA-06:** `fecha_fin` debe ser mayor a `fecha_inicio`
 - **CA-07:** `placa` debe ser única en la BD
 - **CA-08:** `placa` debe ser unica y cumplir formato válido (ej. `ABC-123`)
 - **CA-09:** Año debe ser numérico de 4 dígitos y mayor a 1990
@@ -82,7 +77,8 @@ Como **administrador**, quiero ver una lista general de todas las subastas para 
     - **Vehículo** → `marca + modelo + año` (desde `Asset`)
     - **Placa** (desde `Asset`)
     - **Estado** (`activa`, `pendiente`, `finalizada`, `cancelada`, `vencida`, `en_validacion`, `ganada`, `perdida`, `penalizada`)
-    - **Fecha Inicio** – **Fecha Fin**
+    - **Fecha de creación**
+    - **Fecha límite de pago** (si existe)
     - **Ganador** (nombre del cliente, solo si `id_offerWin` existe, badge descriptivo "no definido" si no tiene)
     - **Resultado BOB** (solo para estados `ganada/perdida/penalizada`)
     - Al **hacer clic en una fila** de la tabla (o tarjeta en mobile), el sistema debe mandar a Pagina de Detalle de la Subasta
@@ -135,22 +131,22 @@ Como administrador, quiero asignar el ganador preliminar de una subasta finaliza
 ### **Condiciones Funcionales**
 
 - **CA-01:** Mostrar modal con formulario que incluya:
-    - Selección de subasta (solo subastas que pasaron `fecha_fin` y están sin ganador asignado)
+    - Selección de subasta (solo subastas en estado `activa` y sin ganador asignado)
     - `user_id` (selección de cliente) *obligatorio*
     - `monto_oferta` (decimal) *obligatorio*
-    - `fecha_oferta` (datetime) *obligatorio*
     - **Checkbox “Asignar fecha límite de pago” [Campo Opcional]**
         - Si está marcado → mostrar campo `fecha_limite_pago` (datetime) para definir el plazo.
 - **CA-02:** Al guardar:
-    - Crear registro en `Offer`:
-        - `auction_id`, `user_id`, `monto_oferta`, `fecha_oferta`
+    - Crear registro en `Guarantee`:
+        - `auction_id`, `user_id`, `monto_oferta`
         - `posicion_ranking = 1`
-        - `fecha_asignacion_ganador = now()`
         - `estado = activa` (pendiente de pago)
-    - Actualizar `Auction`:
-        - `id_offerWin = offer.id`
-        - `estado = pendiente`
         - `fecha_limite_pago = valor ingresado` (si se definió)
+    - Actualizar `Auction`:
+        - `id_offerWin = guarantee.id`
+        - `estado = pendiente`
+    - Compatibilidad de respuestas:
+        - Los endpoints `GET /auctions` y `GET /auctions/:id` exponen `auction.fecha_limite_pago` como campo calculado desde la `Guarantee` ganadora para no romper UI existentes.
     - Calcular `monto_garantia = monto_oferta * 0.08`
     - Cache de saldo se actualiza automáticamente cuando el cliente registre su pago de garantía
     - NO crear Movement aquí - se crea cuando cliente registra pago
@@ -160,11 +156,10 @@ Como administrador, quiero asignar el ganador preliminar de una subasta finaliza
 
 ### **Validaciones de Negocio**
 
-- **VN-01:** Solo mostrar subastas que ya pasaron `fecha_fin` y no tengan `id_offerWin`.
-- **VN-02:** No registrar si ya existe una Offer en `posicion_ranking=1` y `estado != perdedora`.
+- **VN-01:** Solo mostrar subastas en estado `activa` y sin `id_offerWin`.
+- **VN-02:** No registrar si ya existe una Guarantee en `posicion_ranking=1` y `estado != perdedora`.
 - **VN-03:** `monto_oferta > 0` y `<= 999,999.99`
-- **VN-04:** `fecha_oferta` dentro del rango de subasta (`fecha_inicio` ≤ fecha ≤ `fecha_fin`)
-- **VN-05:** `user_id` debe existir y ser tipo cliente.
+- **VN-04:** `user_id` debe existir y ser tipo cliente.
 
 
 ---
@@ -199,10 +194,10 @@ Al asignar ganador, el **detalle de la subasta** debe mostrar sección de **Gana
 
 ### **Estados y Flujo**
 
-- Estado inicial de `Offer`: `activa`
+- Estado inicial de `Guarantee`: `activa`
 - Estado de `Auction`: pasa de `activa` → `pendiente`
-- Si paga en plazo → Offer → `ganadora`, Auction → `finalizada`
-- Si no paga en plazo → Offer → `perdedora`, Auction → `vencida`, habilita **HU-SUB-06 — Reasignar Ganador de Subasta**.
+- Si paga en plazo → Guarantee → `ganadora`, Auction → `finalizada`
+- Si no paga en plazo → Guarantee → `perdedora`, Auction → `vencida`, habilita **HU-SUB-06 — Reasignar Ganador de Subasta**.
 
 ---
 
@@ -223,7 +218,7 @@ Como administrador, quiero ver el detalle completo de una subasta específica y 
     **Información General:**
     
     - Datos del vehículo (marca, modelo, año, placa, descripción)
-    - Fechas de inicio y fin
+    - Fecha de creación
     - Estado actual de la subasta
     - Fecha de creación
     
@@ -232,14 +227,12 @@ Como administrador, quiero ver el detalle completo de una subasta específica y 
     - Nombre completo y documento del ganador
     - Monto de la oferta ganadora
     - Monto de garantía calculado (8%)
-    - Fecha de asignación como ganador
     - Estado de la oferta (`activa`, `ganadora`, `perdedora`)
     
     **Estado del Pago de garantia** (solo si estado = `pendiente` o estado = `en_validacion`)
     
     - Estado del pago: "No registrado" / "Registrado - Pendiente validación"
     - Fecha límite de pago (si está definida) con contador regresivo
-    - Días transcurridos desde asignación de ganador
 
     **Estado del Pago de garantia** (solo si estado = `vencida` y tiene pago rechazado(Movement asociados con estado `rechazado`))
     - Estado del pago: "Pago rechazado"

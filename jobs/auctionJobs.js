@@ -1,7 +1,6 @@
 const cron = require('node-cron');
 const { prisma } = require('../config/database');
 const auctionService = require('../services/auctionService');
-const offerService = require('../services/offerService');
 const { 
   businessCalculations,
   formatters,
@@ -62,23 +61,23 @@ class AuctionJobs {
     Logger.info(`⏰ Procesando subasta vencida: ${auction.id} - ${auction.asset.placa}`);
     
     const result = await prisma.$transaction(async (tx) => {
-      // Obtener la oferta ganadora actual
-      const currentOffer = auction.offers.find(offer => offer.estado === 'activa');
+      // Obtener la garantía ganadora actual
+      const currentGuarantee = auction.guarantees.find(guarantee => guarantee.estado === 'activa');
       
-      if (!currentOffer) {
-        Logger.warn(`⚠️  Subasta ${auction.id} sin oferta ganadora activa`);
+      if (!currentGuarantee) {
+        Logger.warn(`⚠️  Subasta ${auction.id} sin garantía ganadora activa`);
         return null;
       }
       
-      const currentWinner = currentOffer.user;
+      const currentWinner = currentGuarantee.user;
 
       // REGLA NUEVA:
       // No se aplica penalidad en vencimiento. Penalidad solo cuando BOB gana y cliente no paga vehículo (estado 'penalizada').
-      // Aquí solo se marca la oferta actual como perdedora y la subasta como 'vencida'.
+      // Aquí solo se marca la garantía actual como perdedora y la subasta como 'vencida'.
 
-      // 1. Marcar oferta actual como perdedora
-      await tx.offer.update({
-        where: { id: currentOffer.id },
+      // 1. Marcar garantía actual como perdedora
+      await tx.guarantee.update({
+        where: { id: currentGuarantee.id },
         data: { estado: 'perdedora' },
       });
 
@@ -116,14 +115,19 @@ class AuctionJobs {
       const upcomingExpirations = await prisma.auction.findMany({
         where: {
           estado: 'pendiente',
-          fecha_limite_pago: {
-            lte: upcomingDeadline,
-            gt: new Date(),
+          guarantees: {
+            some: {
+              estado: 'activa',
+              fecha_limite_pago: {
+                lte: upcomingDeadline,
+                gt: new Date(),
+              },
+            },
           },
         },
         include: {
           asset: true,
-          offers: {
+          guarantees: {
             where: { estado: 'activa' },
             include: {
               user: {
@@ -150,8 +154,11 @@ class AuctionJobs {
       
       // Log de advertencia para cada subasta próxima a vencer
       upcomingExpirations.forEach(auction => {
-        const winner = auction.offers[0]?.user;
-        const timeRemaining = timeHelpers.getTimeRemaining(auction.fecha_limite_pago);
+        const activeGuarantee = auction.guarantees[0] || null;
+        const winner = activeGuarantee?.user;
+        const timeRemaining = activeGuarantee?.fecha_limite_pago
+          ? timeHelpers.getTimeRemaining(activeGuarantee.fecha_limite_pago)
+          : 'desconocido';
         
         if (winner) {
           Logger.warn(`⏳ URGENTE - ${formatters.fullName(winner)} (${winner.email}) - Subasta ${auction.asset.placa} vence en: ${timeRemaining}`);

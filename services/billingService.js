@@ -38,12 +38,12 @@ class BillingService {
     Logger.info(`Cliente ${userId} creando Billing para subasta ${auction_id}`);
 
     return prisma.$transaction(async (tx) => {
-      // 1) Cargar subasta + asset + offers
+      // 1) Cargar subasta + asset + guarantees
       const auction = await tx.auction.findUnique({
         where: { id: auction_id },
         include: {
           asset: true,
-          offers: true,
+          guarantees: true,
         },
       });
 
@@ -58,9 +58,9 @@ class BillingService {
       }
 
       // VN-02: Verificar ganador
-      const winningOfferId = auction.id_offerWin;
-      const winningOffer = auction.offers.find((o) => o.id === winningOfferId);
-      if (!winningOffer || winningOffer.user_id !== userId) {
+      const winningGuaranteeId = auction.id_offerWin;
+      const winningGuarantee = auction.guarantees.find((o) => o.id === winningGuaranteeId);
+      if (!winningGuarantee || winningGuarantee.user_id !== userId) {
         throw new ConflictError(
           'Solo el ganador puede completar datos de facturación para esta subasta',
           'NOT_WINNER'
@@ -110,7 +110,7 @@ class BillingService {
       let montoGarantia = Number(agg._sum.monto || 0);
       // Fallback: si no encuentra movimientos (consistencia), calcular 8% de la oferta ganadora
       if (montoGarantia <= 0) {
-        montoGarantia = businessCalculations.calculateGuaranteeAmount(Number(winningOffer.monto_oferta));
+        montoGarantia = businessCalculations.calculateGuaranteeAmount(Number(winningGuarantee.monto_oferta));
       }
 
       // Concepto: "Compra vehículo [marca] [modelo] [año] - Subasta #[id]"
@@ -200,7 +200,7 @@ class BillingService {
    * porque este método se usa específicamente cuando se factura una subasta ganada.
    */
   async _recalcularSaldoRetenidoTx(tx, userId) {
-    const offers = await tx.offer.findMany({
+    const offers = await tx.guarantee.findMany({
       where: { user_id: userId },
       select: {
         auction: { select: { id: true, estado: true } },

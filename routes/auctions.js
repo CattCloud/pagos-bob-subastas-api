@@ -14,7 +14,7 @@ const {
 const {
   createWinner,
   reassignWinner,
-} = require('../controllers/offerController');
+} = require('../controllers/guaranteeController');
 const {
   requireAuth,
   requireAdmin
@@ -103,7 +103,6 @@ router.patch('/:id/competition-result', requireAdmin, registerCompetitionResult)
  * @params {string} id - ID de la subasta
  * @body {string} user_id - ID del usuario ganador
  * @body {number} monto_oferta - Monto de la oferta ganadora
- * @body {string} fecha_oferta - Fecha de la oferta
  * @body {string} fecha_limite_pago - Fecha límite para el pago (opcional)
  */
 router.post('/:id/winner', requireAdmin, createWinner);
@@ -115,7 +114,6 @@ router.post('/:id/winner', requireAdmin, createWinner);
  * @params {string} id - ID de la subasta
  * @body {string} user_id - ID del nuevo usuario ganador
  * @body {number} monto_oferta - Monto de la nueva oferta
- * @body {string} fecha_oferta - Fecha de la nueva oferta
  * @body {string} motivo_reasignacion - Motivo de la reasignación (opcional)
  */
 router.post('/:id/reassign-winner', requireAdmin, reassignWinner);

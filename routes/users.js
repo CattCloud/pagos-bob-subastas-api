@@ -3,13 +3,14 @@ const router = express.Router();
 const {
   getWonAuctionsByUser,
   canUserParticipate,
-  getOfferStats,
-} = require('../controllers/offerController');
+  getGuaranteeStats,
+} = require('../controllers/guaranteeController');
 const {
   getBalance,
   getUserMovements,
   createManualMovement,
 } = require('../controllers/balanceController');
+const { listUsers } = require('../controllers/userController');
 const {
   requireAuth,
   requireAdmin,
@@ -18,6 +19,18 @@ const {
 
 // Aplicar autenticación a todas las rutas
 router.use(requireAuth);
+
+/**
+ * @route GET /users
+ * @desc Listar usuarios (solo Admin)
+ * @access Private (Admin only)
+ * @query {string} search - nombre/apellido/email/documento/teléfono
+ * @query {string} document_type - DNI | CE | RUC | Pasaporte
+ * @query {string} user_type - admin | client
+ * @query {number} page - Número de página
+ * @query {number} limit - Registros por página
+ */
+router.get('/', requireAdmin, listUsers);
 
 /**
  * @route GET /api/users/:userId/won-auctions
@@ -72,10 +85,10 @@ router.get('/:userId/movements', getUserMovements);
 router.post('/:userId/movements/manual', requireAdmin, createManualMovement);
 
 /**
- * @route GET /api/users/offers/stats
- * @desc Obtener estadísticas de ofertas (para dashboard admin)
+ * @route GET /api/users/guarantees/stats
+ * @desc Obtener estadísticas de garantías (para dashboard admin)
  * @access Private (Admin only)
  */
-router.get('/offers/stats', requireAdmin, getOfferStats);
+router.get('/guarantees/stats', requireAdmin, getGuaranteeStats);
 
 module.exports = router;

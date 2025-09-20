@@ -78,14 +78,6 @@ const formatters = {
 
 // VALIDACIONES DE NEGOCIO
 const businessValidations = {
-  // Validar que la fecha de oferta esté dentro del rango de subasta
-  isOfferDateValid: (offerDate, auctionStart, auctionEnd) => {
-    const offer = new Date(offerDate);
-    const start = new Date(auctionStart);
-    const end = new Date(auctionEnd);
-    
-    return offer >= start && offer <= end;
-  },
   
   // Validar que la fecha límite de pago sea futura
   isPaymentDeadlineValid: (deadline) => {

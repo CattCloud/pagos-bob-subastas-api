@@ -7,7 +7,7 @@ RECURSOS PRINCIPALES:
 ├── Users (Clientes y Admin)
 ├── Auctions (Subastas)
 ├── Assets (Vehículos)
-├── Offers (Ofertas/Ganadores)
+├── Guarantees (Garantías/Ganadores)
 ├── Movement (Transacciones centrales)
 ├── Movement_References (Referencias genéricas)
 ├── Billing (Facturación/Saldo aplicado)
@@ -20,7 +20,7 @@ RELACIONES:
 - User → Refund (1:N)
 - User → Notifications (1:N)
 - Auction → Asset (1:1)
-- Auction → Offer (1:N)
+- Auction → Guarantee (1:N)
 - Movement → Movement_References (1:N)
 ```
 
@@ -57,7 +57,7 @@ RELACIONES:
 | `PATCH` | `/auctions/:id/extend-deadline` | Extender plazo de pago | Admin |
 | `DELETE` | `/auctions/:id` | Eliminar subasta | Admin |
 
-### **OFERTAS/GANADORES**
+### **GARANTÍAS/GANADORES**
 
 | Método | Endpoint | Descripción | Rol |
 |--------|----------|-------------|-----|
@@ -130,9 +130,92 @@ Notas:
 
 | Método | Endpoint | Descripción | Rol |
 |--------|----------|-------------|-----|
+| `GET` | `/refunds` | Listar solicitudes de reembolso (admin: todas; cliente: propias) | Ambos |
 | `POST` | `/refunds` | Crear solicitud de reembolso | Cliente |
 | `PATCH` | `/refunds/:id/manage` | Confirmar o rechazar solicitud | Admin |
 | `PATCH` | `/refunds/:id/process` | Procesar reembolso confirmado | Admin |
+
+#### GET /refunds
+Query params:
+- estado: solicitados separados por coma (solicitado,confirmado,procesado,rechazado,cancelado) — opcional
+- user_id: filtrar por usuario (solo Admin) — opcional
+- auction_id: filtrar por subasta — opcional
+- fecha_desde, fecha_hasta: rango de creación — opcionales
+- page, limit: paginación — opcionales (default 1, 20)
+
+Reglas de acceso:
+- Admin: ve todas las solicitudes, puede filtrar por user_id.
+- Cliente: únicamente sus propias solicitudes, cualquier user_id enviado será ignorado.
+
+Response (200):
+```json
+{
+  "success": true,
+  "data": {
+    "refunds": [
+      {
+        "id": "cmxxxx...",
+        "user_id": "cmuser...",
+        "auction_id": "cmauct...",
+        "monto_solicitado": "150",
+        "tipo_reembolso": "devolver_dinero",
+        "estado": "confirmado",
+        "fecha_solicitud": "2025-09-18T17:16:38.569Z",
+        "fecha_respuesta_empresa": "2025-09-18T17:16:39.568Z",
+        "fecha_procesamiento": null,
+        "motivo": "Test refund",
+        "created_at": "2025-09-18T17:16:38.569Z",
+        "updated_at": "2025-09-18T17:16:39.570Z",
+        "auction": {
+          "id": "cmauct...",
+          "estado": "penalizada",
+          "asset": {
+            "placa": "ABC-123",
+            "marca": "Toyota",
+            "modelo": "Corolla",
+            "año": 2020,
+            "empresa_propietaria": "Empresa S.A."
+          }
+        }
+      }
+    ],
+    "pagination": { "page": 1, "limit": 20, "total": 1, "total_pages": 1 }
+  }
+}
+```
+
+Alternativa (cuando se requiera ver movimientos de reembolso ya procesados):
+- Usar Movements como fuente de verdad de transacciones:
+  - `GET /users/:userId/movements?tipo_especifico=reembolso&page=1&limit=20`
+  - Devuelve cualquier Movement de tipo reembolso (entrada mantener_saldo o salida devolver_dinero).
+
+#### Listado de reembolsos (cliente) vía Movements
+Request:
+```http
+GET /users/:userId/movements?tipo_especifico=reembolso&page=1&limit=20
+Headers:
+  x-session-id: <session-del-cliente>
+```
+
+Response (200):
+```json
+{
+  "success": true,
+  "data": {
+    "movements": [
+      {
+        "id": "cmov...",
+        "tipo_movimiento_general": "salida",
+        "tipo_movimiento_especifico": "reembolso",
+        "monto": "150.00",
+        "estado": "validado",
+        "created_at": "2024-01-21T12:19:00Z"
+      }
+    ],
+    "pagination": { "page": 1, "limit": 20, "total": 1, "total_pages": 1 }
+  }
+}
+```
 
 #### POST /refunds
 Request (JSON):
@@ -348,8 +431,6 @@ Notas:
 **Request:**
 ```json
 {
-  "fecha_inicio": "2024-01-15T10:00:00Z", 
-  "fecha_fin": "2024-01-20T18:00:00Z", 
   "asset": {
     "placa": "ABC-123", // String, obligatorio, único
     "empresa_propietaria": "Empresa S.A.", // String, obligatorio
@@ -367,21 +448,21 @@ Notas:
   "success": true,
   "data": {
     "auction": {
-      "id": 1,
-      "fecha_inicio": "2024-01-15T10:00:00Z",
-      "fecha_fin": "2024-01-20T18:00:00Z",
-      "fecha_limite_pago": null,
+      "id": "cmxxxx...",
+      "fecha_limite_pago": null, // Campo calculado desde Guarantee ganadora cuando exista; puede no estar presente al crear
+      "fecha_resultado_general": null,
       "estado": "activa",
       "id_offerWin": null,
+      "finished_at": null,
+      "created_at": "2025-09-19T16:00:00Z",
       "asset": {
-        "id": 1,
+        "id": "cmasset...",
         "placa": "ABC-123",
         "marca": "Toyota",
         "modelo": "Corolla",
         "año": 2020,
         "empresa_propietaria": "Empresa S.A."
-      },
-      "created_at": "2024-01-01T12:00:00Z"
+      }
     }
   },
   "message": "Subasta creada exitosamente"
@@ -405,7 +486,7 @@ Notas:
   "data": {
     "auctions": [
       {
-        "id": 1,
+        "id": "cmxxxx...",
         "asset": {
           "marca": "Toyota",
           "modelo": "Corolla",
@@ -413,8 +494,7 @@ Notas:
           "placa": "ABC-123"
         },
         "estado": "pendiente",
-        "fecha_inicio": "2024-01-15T10:00:00Z",
-        "fecha_fin": "2024-01-20T18:00:00Z",
+        "fecha_limite_pago": null, // Calculado desde Guarantee ganadora cuando exista
         "winner": {
           "name": "Juan Pérez",
           "document": "DNI 12345678"
@@ -431,17 +511,16 @@ Notas:
 }
 ```
 
-### **GANADORES**
+### **GARANTÍAS (GANADORES)**
 
 #### **POST /api/auctions/:id/winner**
 
 **Request:**
 ```json
 {
-  "user_id": 5, // ID del cliente ganador, obligatorio
+  "user_id": "cmuser...", // ID del cliente ganador, obligatorio
   "monto_oferta": 12000.00, // Decimal, obligatorio, > 0
-  "fecha_oferta": "2024-01-18T14:30:00Z", // ISO 8601, obligatorio
-  "fecha_limite_pago": "2024-01-21T10:00:00Z" // ISO 8601, opcional
+  "fecha_limite_pago": "2025-09-19T18:00:00Z" // ISO 8601, opcional
 }
 ```
 
@@ -450,20 +529,20 @@ Notas:
 {
   "success": true,
   "data": {
-    "offer": {
-      "id": 1,
-      "user_id": 5,
-      "auction_id": 1,
+    "guarantee": {
+      "id": "cmguar...",
+      "user_id": "cmuser...",
+      "auction_id": "cmauct...",
       "monto_oferta": 12000.00,
       "monto_garantia": 960.00, // Calculado automáticamente (8%)
       "posicion_ranking": 1,
       "estado": "activa",
-      "fecha_asignacion_ganador": "2024-01-21T12:00:00Z"
+      "fecha_limite_pago": "2025-09-19T18:00:00Z" // Ahora vive en Guarantee
     },
-    "auction_updated": {
-      "id": 1,
+    "auction": {
+      "id": "cmauct...",
       "estado": "pendiente",
-      "fecha_limite_pago": "2024-01-21T10:00:00Z"
+      "fecha_limite_pago": "2025-09-19T18:00:00Z" // Campo calculado desde la Guarantee ganadora
     }
   },
   "message": "Ganador asignado exitosamente"
@@ -661,25 +740,23 @@ Notas:
 ### **SUBASTAS**
 
 1. **Creación**: Solo admin puede crear subastas
-2. **Fecha inicio**: Debe ser mayor a fecha/hora actual
-3. **Fecha fin**: Debe ser mayor a fecha inicio
-4. **Placa única**: No puede existir otra subasta activa con la misma placa
-5. **Estados válidos**: `activa` → `pendiente` → `en_validacion` → `finalizada` → `ganada/perdida/penalizada` → `facturada`
-6. **Eliminación**: Solo si no tiene ofertas asociadas
+2. **Filtros de fecha**: Se realizan sobre `created_at` (no existen fecha_inicio/fecha_fin)
+3. **Placa única**: No puede existir otra subasta activa con la misma placa
+4. **Estados válidos**: `activa` → `pendiente` → `en_validacion` → `finalizada` → `ganada/perdida/penalizada` → `facturada`
+5. **Eliminación**: Solo si no tiene garantías asociadas
 
 ### **GANADORES**
 
 1. **Asignación**: Solo en subastas con estado `activa`
 2. **Usuario válido**: Debe existir y ser tipo `client`
 3. **Monto oferta**: Debe ser > 0 y <= 999,999.99
-4. **Fecha oferta**: Debe estar entre `fecha_inicio` y `fecha_fin` de subasta
 5. **Garantía**: Se calcula automáticamente como 8% de monto_oferta
 
 ### **TRANSACCIONES (MOVEMENT)**
 
 1. **Registro**: Solo ganadores actuales de subastas en estado `pendiente`
 2. **Monto exacto**: Debe coincidir exactamente con el 8% calculado
-3. **Fecha pago**: No puede ser futura ni anterior a fecha inicio de subasta
+3. **Fecha pago**: No puede ser futura
 4. **Archivo**: PDF/JPG/PNG, máximo 5MB
 5. **Actualización inmediata**: Al registrar → cache saldo recalculado vía lógica aplicación
 6. **Estado subasta**: `pendiente` → `en_validacion`
@@ -713,7 +790,7 @@ Notas:
 ### **VENCIMIENTOS**
 
 1. **Manual**: Admin puede marcar como vencido en cualquier momento
-2. **Automático**: Si existe `fecha_limite_pago` y se supera
+2. **Automático**: Si la Guarantee ganadora tiene `fecha_limite_pago` y se supera
 3. **Penalidad**: Máximo 30% del saldo disponible
 4. **Reasignación**: Automática al siguiente postor si existe
 

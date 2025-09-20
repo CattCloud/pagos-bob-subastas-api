@@ -34,7 +34,7 @@
   "homepage": "https://github.com/CattCloud/pagos-bob-subastas-api#readme",
   "dependencies": {
     "@emailjs/nodejs": "^5.0.2",
-    "@prisma/client": "^6.16.1",
+    "@prisma/client": "^6.16.2",
     "cloudinary": "^2.7.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
@@ -47,6 +47,6 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.10",
-    "prisma": "^6.16.1"
+    "prisma": "^6.16.2"
   }
 }

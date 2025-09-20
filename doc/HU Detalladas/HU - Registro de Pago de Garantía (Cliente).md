@@ -60,7 +60,7 @@ Como cliente, quiero seleccionar la subasta específica por la cual realizaré e
 ### **Condiciones Funcionales:**
 
 - **CA-01:** Mostrar lista de subastas donde el cliente fue asignado como ganador:
-    - Solo subastas con `Offer` donde `user_id = cliente` y `estado = activa`
+    - Solo subastas con `Guarantee` donde `user_id = cliente` y `estado = activa`
     - Solo subastas con `Auction.estado = pendiente`
 - **CA-02:** Para cada subasta mostrar:
     - Información del vehículo (`marca + modelo + año + placa`)
@@ -137,7 +137,7 @@ Como cliente, quiero registrar los detalles de mi depósito o transferencia banc
 - **CA-06:** `monto` debe ser mayor a 0 y menor a $999,999.99
 - **CA-07:** `numero_cuenta_origen` debe tener formato válido (10-20 dígitos)
 - **CA-08:** `numero_operacion` debe ser alfanumérico, entre 3-100 caracteres
-- **CA-09:** `fecha_pago` no puede ser futura ni anterior a fecha inicio de subasta
+- **CA-09:** `fecha_pago` no puede ser futura
 - **CA-10:** Archivo de comprobante:
     - Formatos: PDF, JPG, PNG
     - Tamaño máximo: 5MB
@@ -198,7 +198,7 @@ Como cliente, quiero revisar toda la información antes de confirmar el registro
     - `created_at` = now()
 - **CA-03:** Crear registros en `Movement_References`:
     - Referencia a `Auction`: `reference_type = 'auction'`, `reference_id = auction_id`
-    - Referencia a `Offer`: `reference_type = 'offer'`, `reference_id = offer_id`
+    - Referencia a `Guarantee`: `reference_type = 'guarantee'`, `reference_id = guarantee_id`
 - **CA-04:** Actualizar estado de la subasta: `Auction.estado = 'en_validacion'`
 - **CA-05:** Actualizar cache automático en `User`:
     - Backend ejecuta función para recalcular `saldo_total` y `saldo_retenido` INMEDIATAMENTE

@@ -297,10 +297,10 @@ Como administrador, quiero marcar un pago de garantía como vencido para aplicar
         - Monto de penalidad que se aplicará.
         - Motivo del vencimiento (campo obligatorio).
 - **CA-02:** **Vencimiento Automático** (cron job cada hora):
-    - Para subastas con `fecha_limite_pago` definida.
-    - Si `fecha_limite_pago < now()` **y** subasta sigue en estado `pendiente`.
+    - Para subastas cuyo ganador tenga `Guarantee.fecha_limite_pago` definida.
+    - Si `Guarantee.fecha_limite_pago < now()` **y** subasta sigue en estado `pendiente`.
     - Cambiar automáticamente `Auction.estado = vencida`.
-    - Cambiar `Offer.estado = perdedora`.
+    - Cambiar `Guarantee.estado = perdedora`.
     - Generar log de vencimientos automáticos para admin.
 - **CA-03:** **Vencimiento Manual**:
     - Disponible independientemente de si hay fecha límite.
@@ -353,9 +353,10 @@ Como administrador, quiero extender el plazo de pago de una garantía para dar m
     - Nueva fecha límite (datetime picker) *obligatorio*
     - Tiempo de extensión calculados automáticamente
 - **CA-03:** Al confirmar:
-    - Actualizar `Auction.fecha_limite_pago`
+    - Actualizar `Guarantee.fecha_limite_pago` del ganador
     - Crear registro de auditoría del cambio
     - Mantener estado de subasta `pendiente`
+    - Compatibilidad: las respuestas de `GET /auctions` y `GET /auctions/:id` exponen `auction.fecha_limite_pago` como campo calculado desde la Guarantee ganadora
 
 ### **Validaciones de Negocio**
 

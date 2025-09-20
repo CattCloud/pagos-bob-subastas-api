@@ -5,6 +5,7 @@ const {
   createRefund,
   manageRefund,
   processRefund,
+  listRefunds,
 } = require('../controllers/refundController');
 
 const { requireAuth, requireClient, requireAdmin } = require('../middleware/auth');
@@ -18,6 +19,20 @@ const { requireAuth, requireClient, requireAdmin } = require('../middleware/auth
 
 // Autenticación para todas las rutas de refunds
 router.use(requireAuth);
+
+/**
+ * @route GET /refunds
+ * @desc Listar solicitudes de reembolso
+ * @access Private (Admin: todas | Client: solo propias)
+ * @query {string} estado - (opcional) 'solicitado,confirmado,procesado,rechazado,cancelado'
+ * @query {string} user_id - (admin opcional) filtrar por usuario
+ * @query {string} auction_id - (opcional) filtrar por subasta
+ * @query {string} fecha_desde - (opcional) ISO date
+ * @query {string} fecha_hasta - (opcional) ISO date
+ * @query {number} page - (opcional) default 1
+ * @query {number} limit - (opcional) default 20
+ */
+router.get('/', listRefunds);
 
 /**
  * @route POST /api/refunds

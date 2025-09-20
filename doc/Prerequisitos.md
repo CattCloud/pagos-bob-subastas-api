@@ -403,11 +403,8 @@ Cuando el ganador original no realiza el pago antes del límite:
 
 - id (PK)
 - asset_id (FK)*
-- fecha_inicio*
-- fecha_fin*
-- fecha_limite_pago (Momento exacto hasta el cual el ganador puede pagar)
 - estado (activa, pendiente, en_validacion, finalizada, **ganada**, **facturada**, **perdida**, **penalizada**, vencida, cancelada)
-- id_offerWin (es el id de la oferta que gano)
+- id_offerWin (es el id de la garantía ganadora)
 - fecha_resultado_general (cuándo se resolvió competencia externa)
 - finished_at (Cuando ya paso la subasta a finalizado y se tiene un ganador establecido)
 - created_at
@@ -445,7 +442,7 @@ Cuando el ganador original no realiza el pago antes del límite:
 
 - id (PK)
 - movement_id (FK) -- Apunta a Movement
-- reference_type VARCHAR(50) -- 'auction', 'offer', 'refund'
+- reference_type VARCHAR(50) -- 'auction', 'guarantee', 'refund'
 - reference_id INT -- ID de la entidad referenciada
 - created_at DATETIME
 
@@ -468,26 +465,25 @@ Cuando el ganador original no realiza el pago antes del límite:
 - updated_at DATETIME
 
 
-### **ENTIDAD 5: Offer(Ofertas)**
+### **ENTIDAD 5: Guarantee (Garantías)**
 
-**Representa: Ofertas relevantes realizadas en una subasta**, no solo la ganadora hasta el ranking 3.
+**Representa: Garantía/ganador preliminar asociado a una subasta.** Reemplaza el concepto de "Offer". Usada principalmente para el ganador actual (`posicion_ranking = 1`) y posibles reasignaciones.
 
 **Atributos:**
 
 - id (PK)
-- auction_id (FK)* (Subasta en la que participa)
-- user_id (FK)* (Usuario que hizo la oferta)
-- monto_oferta* (Valor ofertado)
-- fecha_oferta*
+- auction_id (FK)* (Subasta en la que se asigna)
+- user_id (FK)* (Usuario ganador asignado)
+- monto_oferta* (Valor de la oferta ganadora)
 - posicion_ranking (1=ganador, 2=segundo, etc.)
-- fecha_asignacion_ganador (Fecha/hora en que esta oferta fue declarada ganadora)
 - estado (activa/ganadora/perdedora)
+- fecha_limite_pago (Momento exacto hasta el cual el ganador puede pagar) // movido desde Auction
 
-| Estado      | Significado                                                | Acciones que lo llevan a este estado                                         |
-| ----------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `activa`    | Ganador preliminar asignado, pendiente de pago de garantía | Admin registra ganador y se crea offer con estado `activa`                   |
-| `ganadora`  | Oferta confirmada, garantía pagada y validada              | Cuando el pago de garantía se confirma                                       |
-| `perdedora` | Oferta descartada, ya no es candidata                      | Cuando se reasigna el ganador a otro usuario o la subasta se cierra sin pago |
+| Estado      | Significado                                                | Acciones que lo llevan a este estado                                                  |
+| ----------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `activa`    | Ganador preliminar asignado, pendiente de pago de garantía | Admin registra ganador y se crea guarantee con estado `activa`                        |
+| `ganadora`  | Garantía confirmada, pago de garantía validado             | Cuando el pago de garantía se confirma                                                |
+| `perdedora` | Garantía descartada, ya no es candidata                    | Cuando se reasigna el ganador a otro usuario o la subasta se cierra sin pago          |
 
 
 

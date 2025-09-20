@@ -24,7 +24,7 @@ class MovementService {
    * - Valida unicidad de numero_operacion para el usuario
    * - Sube voucher a Cloudinary
    * - Crea Movement en estado 'pendiente'
-   * - Crea Movement_References a auction y offer
+   * - Crea Movement_References a auction y guarantee
    * - Actualiza Auction.estado = 'en_validacion'
    * - Recalcula cache saldos (por estado de subasta)
    */
@@ -55,7 +55,7 @@ class MovementService {
         where: { id: auction_id },
         include: {
           asset: true,
-          offers: {
+          guarantees: {
             where: { user_id: userId },
             orderBy: { posicion_ranking: 'asc' },
             take: 1,
@@ -69,9 +69,9 @@ class MovementService {
         throw BusinessErrors.InvalidAuctionState('pendiente|en_validacion', auction.estado);
       }
 
-      // 2) Validar que el usuario tiene oferta asociada a la subasta (ganador vigente)
-      const userOffer = auction.offers?.[0];
-      if (!userOffer) {
+      // 2) Validar que el usuario tiene garantía asociada a la subasta (ganador vigente)
+      const userGuarantee = auction.guarantees?.[0];
+      if (!userGuarantee) {
         throw new ConflictError(
           'Solo el ganador/ganadora puede registrar el pago de garantía para esta subasta',
           'NOT_CURRENT_WINNER'
@@ -80,31 +80,24 @@ class MovementService {
 
       // 3) Validar monto exacto = 8% de oferta
       const expectedAmount =
-        businessCalculations?.calculateGuaranteeAmount?.(userOffer.monto_oferta) ??
-        Number((Number(userOffer.monto_oferta) * 0.08).toFixed(2));
+        businessCalculations?.calculateGuaranteeAmount?.(userGuarantee.monto_oferta) ??
+        Number((Number(userGuarantee.monto_oferta) * 0.08).toFixed(2));
 
       const isValidGuarantee =
-        businessValidations?.isGuaranteeAmountValid?.(monto, userOffer.monto_oferta) ??
+        businessValidations?.isGuaranteeAmountValid?.(monto, userGuarantee.monto_oferta) ??
         Number(monto) === expectedAmount;
 
       if (!isValidGuarantee) {
         throw BusinessErrors.InvalidAmount(expectedAmount, monto);
       }
 
-      // 4) Validar fecha de pago
-      const paymentDate = new Date(fecha_pago);
-      const auctionStart = new Date(auction.fecha_inicio);
-      const now = new Date();
-
-      if (paymentDate > now) {
-        throw new ConflictError('La fecha de pago no puede ser futura', 'FUTURE_PAYMENT_DATE');
-      }
-      if (paymentDate < auctionStart) {
-        throw new ConflictError(
-          'La fecha de pago no puede ser anterior al inicio de la subasta',
-          'INVALID_PAYMENT_DATE'
-        );
-      }
+            // 4) Validar fecha de pago (solo no futura; subasta ya no tiene fecha_inicio/fin)
+            const paymentDate = new Date(fecha_pago);
+            const now = new Date();
+      
+            if (paymentDate > now) {
+              throw new ConflictError('La fecha de pago no puede ser futura', 'FUTURE_PAYMENT_DATE');
+            }
 
       // 5) Validar unicidad de numero_operacion por usuario
       if (numero_operacion) {
@@ -157,7 +150,7 @@ class MovementService {
         },
       });
 
-      // 8) Referencias (auction, offer)
+      // 8) Referencias (auction, guarantee)
       await tx.movementReference.createMany({
         data: [
           {
@@ -167,8 +160,8 @@ class MovementService {
           },
           {
             movement_id: movement.id,
-            reference_type: 'offer',
-            reference_id: userOffer.id,
+            reference_type: 'guarantee',
+            reference_id: userGuarantee.id,
           },
         ],
       });
@@ -264,21 +257,9 @@ class MovementService {
         include: { asset: true },
       });
 
-      // Recalcular saldo_total; actualizar retenido incrementalmente (evitar liberar otras retenciones)
+      // Recalcular saldo_total y retenido basado en movimientos validados (consistente con RN07)
       await this._recalcularSaldoTotalTx(tx, movement.user_id);
-
-      // Incrementar retenido por monto de garantía aprobada
-      const currentUser = await tx.user.findUnique({
-        where: { id: movement.user_id },
-        select: { saldo_retenido: true },
-      });
-      const newRetenido = Number(
-        (Number(currentUser?.saldo_retenido || 0) + Number(approved.monto || 0)).toFixed(2)
-      );
-      await tx.user.update({
-        where: { id: movement.user_id },
-        data: { saldo_retenido: newRetenido },
-      });
+      await this._recalcularSaldoRetenidoTx(tx, movement.user_id);
 
       // Notificación pago_validado
       await this._notifySafe('pago_validado', {
@@ -530,12 +511,12 @@ class MovementService {
   /**
    * Recalcula y actualiza User.saldo_retenido (RN07):
    * retenido = sum(pagos_garantia validados en subastas con estado en
-   * ['finalizada','ganada','perdida','penalizada']) - sum(reembolsos de salida validados).
+   * ['finalizada','ganada','perdida','penalizada']) - sum(reembolsos validados (entrada o salida)).
    * 'facturada' NO retiene.
    */
   async _recalcularSaldoRetenidoTx(tx, userId) {
     // Obtener IDs de subastas del usuario en estados que retienen
-    const offers = await tx.offer.findMany({
+    const offers = await tx.guarantee.findMany({
       where: { user_id: userId },
       select: {
         id: true,
@@ -573,12 +554,11 @@ class MovementService {
       select: { monto: true },
     });
 
-    // Reembolsos validados referenciando esas mismas subastas
+    // Reembolsos validados (entrada: mantener_saldo o salida: devolver_dinero) referenciando esas mismas subastas
     const refundMovs = await tx.movement.findMany({
       where: {
         user_id: userId,
         estado: 'validado',
-        tipo_movimiento_general: 'salida',
         tipo_movimiento_especifico: 'reembolso',
         references: {
           some: {

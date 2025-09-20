@@ -116,7 +116,7 @@ class BalanceService {
 
     const formattedMovements = movements.map((m) => {
       const auctionRef = (m.references || []).find((r) => r.reference_type === 'auction');
-      const offerRef = (m.references || []).find((r) => r.reference_type === 'offer');
+      const guaranteeRef = (m.references || []).find((r) => r.reference_type === 'guarantee');
       const refundRef = (m.references || []).find((r) => r.reference_type === 'refund');
 
       return {
@@ -133,7 +133,7 @@ class BalanceService {
         created_at: m.created_at,
         references: {
           auction_id: auctionRef?.reference_id || null,
-          offer_id: offerRef?.reference_id || null,
+          guarantee_id: guaranteeRef?.reference_id || null,
           refund_id: refundRef?.reference_id || null,
         },
       };
@@ -419,7 +419,7 @@ class BalanceService {
    */
   async _recalcularSaldoRetenidoTx(tx, userId) {
     // 1) Subastas del usuario con estado
-    const offers = await tx.offer.findMany({
+    const guarantees = await tx.guarantee.findMany({
       where: { user_id: userId },
       select: {
         auction: { select: { id: true, estado: true } },
@@ -427,7 +427,7 @@ class BalanceService {
     });
 
     const retenedorStates = new Set(['finalizada', 'ganada', 'perdida']);
-    const auctionIdsToRetain = offers
+    const auctionIdsToRetain = guarantees
       .filter((o) => o.auction && retenedorStates.has(o.auction.estado))
       .map((o) => o.auction.id);
 

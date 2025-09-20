@@ -27,7 +27,7 @@
 - `GET /users/:userId/balance` - Saldo de usuario
 - `GET /users/:userId/movements` - Movimientos de usuario
 - `POST /users/:userId/movements/manual` - Movimiento manual (Admin)
-- `GET /users/offers/stats` - Estadísticas de ofertas (Admin)
+- `GET /users/guarantees/stats` - Estadísticas de garantías (Admin)
 
 ### **MOVEMENTS (TRANSACCIONES)** (`/movements`)
 - `GET /movements` - Listar transacciones (admin: todas, cliente: propias)

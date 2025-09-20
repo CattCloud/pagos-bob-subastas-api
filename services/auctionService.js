@@ -18,7 +18,7 @@ class AuctionService {
    * Crear nueva subasta con activo asociado
    */
   async createAuction(auctionData) {
-    const { fecha_inicio, fecha_fin, asset } = auctionData;
+    const { asset } = auctionData;
     
     Logger.info(`Creando nueva subasta para vehículo: ${asset.placa}`);
     
@@ -69,8 +69,6 @@ class AuctionService {
       const auction = await tx.auction.create({
         data: {
           asset_id: createdAsset.id,
-          fecha_inicio,
-          fecha_fin,
           estado: 'activa',
         },
         include: {
@@ -110,11 +108,11 @@ class AuctionService {
       where.estado = { in: estados };
     }
     
-    // Filtro por fechas
+    // Filtro por fechas (usar created_at ya que no existe fecha_inicio/fin)
     if (fecha_desde || fecha_hasta) {
-      where.fecha_inicio = {};
-      if (fecha_desde) where.fecha_inicio.gte = new Date(fecha_desde);
-      if (fecha_hasta) where.fecha_inicio.lte = new Date(fecha_hasta);
+      where.created_at = {};
+      if (fecha_desde) where.created_at.gte = new Date(fecha_desde);
+      if (fecha_hasta) where.created_at.lte = new Date(fecha_hasta);
     }
     
     // Filtro de búsqueda en activo
@@ -143,7 +141,7 @@ class AuctionService {
               empresa_propietaria: true,
             },
           },
-          offers: {
+          guarantees: {
             where: { estado: 'activa' },
             include: {
               user: {
@@ -166,23 +164,25 @@ class AuctionService {
     ]);
     
     // Formatear resultados
-    const formattedAuctions = auctions.map(auction => ({
-      id: auction.id,
-      asset: auction.asset,
-      estado: auction.estado,
-      fecha_inicio: auction.fecha_inicio,
-      fecha_fin: auction.fecha_fin,
-      fecha_limite_pago: auction.fecha_limite_pago,
-      winner: auction.offers.length > 0 ? {
-        name: formatters.fullName(auction.offers[0].user),
-        document: formatters.document(
-          auction.offers[0].user.document_type, 
-          auction.offers[0].user.document_number
-        ),
-        monto_oferta: auction.offers[0].monto_oferta,
-      } : null,
-      created_at: auction.created_at,
-    }));
+    const formattedAuctions = auctions.map(auction => {
+      const activeWinner = auction.guarantees[0] || null;
+      return {
+        id: auction.id,
+        asset: auction.asset,
+        estado: auction.estado,
+        // Compatibilidad: exponer fecha límite a nivel auction desde Guarantee ganadora
+        fecha_limite_pago: activeWinner?.fecha_limite_pago || null,
+        winner: activeWinner ? {
+          name: formatters.fullName(activeWinner.user),
+          document: formatters.document(
+            activeWinner.user.document_type,
+            activeWinner.user.document_number
+          ),
+          monto_oferta: activeWinner.monto_oferta,
+        } : null,
+        created_at: auction.created_at,
+      };
+    });
     
     const pagination = paginationHelpers.generatePaginationMeta(page, limit, total);
     
@@ -197,7 +197,7 @@ class AuctionService {
       where: { id: auctionId },
       include: {
         asset: true,
-        offers: {
+        guarantees: {
           include: {
             user: {
               select: {
@@ -218,8 +218,13 @@ class AuctionService {
     if (!auction) {
       throw BusinessErrors.AuctionNotFound();
     }
-    
-    return auction;
+
+    // Compatibilidad: inyectar fecha_limite_pago desde Guarantee ganadora
+    const winner = auction.guarantees.find(g => g.id === auction.id_offerWin) || auction.guarantees[0] || null;
+    return {
+      ...auction,
+      fecha_limite_pago: winner?.fecha_limite_pago || null,
+    };
   }
   
   /**
@@ -260,7 +265,16 @@ class AuctionService {
    * Extender fecha límite de pago
    */
   async extendPaymentDeadline(auctionId, newDeadline, motivo = null) {
-    const auction = await this.getAuctionById(auctionId);
+    // Cargar subasta base (sin campo fecha_limite_pago en DB)
+    const auction = await prisma.auction.findUnique({
+      where: { id: auctionId },
+      select: {
+        id: true,
+        estado: true,
+        id_offerWin: true,
+      },
+    });
+    if (!auction) throw BusinessErrors.AuctionNotFound();
     
     // Validar que la subasta pueda tener extensión
     if (!['pendiente', 'en_validacion'].includes(auction.estado)) {
@@ -274,15 +288,15 @@ class AuctionService {
         'INVALID_DEADLINE'
       );
     }
-    
-    const updatedAuction = await prisma.auction.update({
-      where: { id: auctionId },
-      data: {
-        fecha_limite_pago: new Date(newDeadline),
-      },
-      include: {
-        asset: true,
-      },
+
+    if (!auction.id_offerWin) {
+      throw new ConflictError('No existe garantía ganadora para extender plazo', 'NO_WINNING_GUARANTEE');
+    }
+
+    // Actualizar fecha en Guarantee ganadora
+    await prisma.guarantee.update({
+      where: { id: auction.id_offerWin },
+      data: { fecha_limite_pago: new Date(newDeadline) },
     });
     
     Logger.info(`Fecha límite extendida para subasta ${auctionId}`, {
@@ -290,7 +304,22 @@ class AuctionService {
       motivo,
     });
     
-    return updatedAuction;
+    // Compatibilidad: devolver objeto "auction" con fecha_limite_pago calculado
+    const updated = await prisma.auction.findUnique({
+      where: { id: auctionId },
+      include: {
+        asset: true,
+        guarantees: {
+          include: { user: true },
+          orderBy: { posicion_ranking: 'asc' },
+        },
+      },
+    });
+    const winner = updated.guarantees.find(g => g.id === updated.id_offerWin) || updated.guarantees[0] || null;
+    return {
+      ...updated,
+      fecha_limite_pago: winner?.fecha_limite_pago || null,
+    };
   }
   
   /**
@@ -300,7 +329,7 @@ class AuctionService {
     const auction = await this.getAuctionById(auctionId);
     
     // Verificar que no tenga ofertas asociadas
-    if (auction.offers.length > 0) {
+    if (auction.guarantees.length > 0) {
       throw new ConflictError(
         'No se puede eliminar una subasta que tiene ofertas asociadas',
         'HAS_OFFERS'
@@ -341,16 +370,20 @@ class AuctionService {
   async getExpiredAuctions() {
     const now = new Date();
     
+    // Buscar subastas con garantía ganadora activa cuyo deadline (en Guarantee) expiró
     const expiredAuctions = await prisma.auction.findMany({
       where: {
         estado: 'pendiente',
-        fecha_limite_pago: {
-          lte: now,
+        guarantees: {
+          some: {
+            estado: 'activa',
+            fecha_limite_pago: { lte: now },
+          },
         },
       },
       include: {
         asset: true,
-        offers: {
+        guarantees: {
           where: { estado: 'activa' },
           include: {
             user: true,
@@ -379,7 +412,7 @@ class AuctionService {
         where: { id: auctionId },
         include: {
           asset: true,
-          offers: true,
+          guarantees: true,
         },
       });
       if (!auction) throw BusinessErrors.AuctionNotFound();
@@ -394,7 +427,7 @@ class AuctionService {
 
       // Offer ganador y usuario
       const winningOfferId = auction.id_offerWin;
-      const winningOffer = auction.offers.find(o => o.id === winningOfferId);
+      const winningOffer = auction.guarantees.find(o => o.id === winningOfferId);
       if (!winningOffer) {
         throw new ConflictError('No se encontró la oferta ganadora para esta subasta', 'NO_WINNING_OFFER');
       }
@@ -437,12 +470,12 @@ class AuctionService {
 
       const recalcSaldoRetenidoTx = async (uid) => {
         // RN07: Estados que retienen: finalizada, ganada, perdida, penalizada
-        const offers = await tx.offer.findMany({
+        const guarantees = await tx.guarantee.findMany({
           where: { user_id: uid },
           select: { auction: { select: { id: true, estado: true } } },
         });
         const retainStates = new Set(['finalizada', 'ganada', 'perdida']);
-        const auctionIdsToRetain = offers
+        const auctionIdsToRetain = guarantees
           .filter((o) => o.auction && retainStates.has(o.auction.estado))
           .map((o) => o.auction.id);
 

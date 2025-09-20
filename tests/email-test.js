@@ -24,7 +24,7 @@ const emailService = require('../services/emailService');
       templateId: process.env.EMAILJS_TEMPLATE_ID,
       templateParams: {
         action_label: 'Ir al sistema',
-        action_url: 'http://localhost:5173',
+        action_url: 'http://localhost:5174',
         timestamp: new Date().toLocaleString('es-PE'),
       },
     });

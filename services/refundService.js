@@ -8,6 +8,7 @@ const {
 const balanceService = require('./balanceService');
 const notificationService = require('./notificationService');
 const { uploadToCloudinary } = require('../config/cloudinary');
+const { paginationHelpers } = require('../utils');
 
 /**
  * Servicio de Reembolsos
@@ -51,14 +52,10 @@ class RefundService {
         );
       }
 
-      // CRÍTICO: Validar contra saldo_disponible global antes de validaciones específicas
-      const balance = await balanceService.getBalance(userId, tx);
-      if (Number(monto_solicitado) > balance.saldo_disponible) {
-        throw new ConflictError(
-          `Monto solicitado ($${monto_solicitado}) excede saldo disponible ($${balance.saldo_disponible})`,
-          'INSUFFICIENT_AVAILABLE_BALANCE'
-        );
-      }
+      // Nota: No validar contra saldo_disponible global aquí.
+      // La validación correcta se realiza contra el saldo retenido por subasta (RN07) más abajo.
+      // Esto permite solicitar reembolso incluso si el saldo_disponible es 0,
+      // siempre que exista retenido pendiente asociado a la subasta.
 
       // VN-06 (opcional por ahora): si se provee auction_id, validar pertenencia y retenido disponible
       if (auction_id) {
@@ -67,10 +64,10 @@ class RefundService {
           select: {
             id: true,
             estado: true,
-            offers: { where: { user_id: userId }, select: { id: true } },
+            guarantees: { where: { user_id: userId }, select: { id: true } },
           },
         });
-        if (!auction || !auction.offers?.length) {
+        if (!auction || !auction.guarantees?.length) {
           throw new ConflictError(
             'auction_id no corresponde a una subasta del cliente',
             'INVALID_AUCTION_FOR_REFUND'
@@ -284,7 +281,7 @@ class RefundService {
         const candidates = await tx.auction.findMany({
           where: {
             estado: { in: ['perdida', 'penalizada'] },
-            offers: { some: { user_id: userId } },
+            guarantees: { some: { user_id: userId } },
           },
           orderBy: { updated_at: 'desc' },
           select: { id: true },
@@ -439,6 +436,73 @@ class RefundService {
     });
   }
 
+  /**
+   * Listar solicitudes de reembolso (Refunds) para Admin o Cliente
+   * - Admin: puede ver todos y filtrar por user_id/auction_id/estado/fechas
+   * - Cliente: solo ve sus propias solicitudes (se ignora user_id si lo envía)
+   */
+  async listRefunds(requestingUser, filters = {}) {
+    const {
+      page = 1,
+      limit = 20,
+      estado,
+      user_id,
+      auction_id,
+      fecha_desde,
+      fecha_hasta,
+    } = filters;
+
+    const offset = paginationHelpers.calculateOffset(page, limit);
+
+    // Construir filtros
+    const where = {};
+
+    // Visibilidad por rol
+    if (requestingUser?.user_type === 'admin') {
+      if (user_id) where.user_id = user_id;
+    } else {
+      // Cliente: restringir a su propio user_id
+      where.user_id = requestingUser.id;
+    }
+
+    if (estado) {
+      const estados = Array.isArray(estado) ? estado : (typeof estado === 'string' ? estado.split(',').map(s => s.trim()) : []);
+      if (estados.length > 0) where.estado = { in: estados };
+    }
+
+    if (auction_id) {
+      where.auction_id = auction_id;
+    }
+
+    if (fecha_desde || fecha_hasta) {
+      where.created_at = {};
+      if (fecha_desde) where.created_at.gte = new Date(fecha_desde);
+      if (fecha_hasta) where.created_at.lte = new Date(fecha_hasta);
+    }
+
+    // Ejecutar consulta con paginación
+    const [refunds, total] = await Promise.all([
+      prisma.refund.findMany({
+        where,
+        include: {
+          auction: {
+            include: {
+              asset: true,
+            },
+          },
+        },
+        orderBy: { created_at: 'desc' },
+        skip: offset,
+        take: parseInt(limit),
+      }),
+      prisma.refund.count({ where }),
+    ]);
+
+    const pagination = paginationHelpers.generatePaginationMeta(page, limit, total);
+
+    return { refunds, pagination };
+  }
+
   // ---------------- Helpers (cálculo de cache) ----------------
 
   async _recalcularSaldoTotalTx(tx, userId) {
@@ -475,7 +539,7 @@ class RefundService {
 
   async _recalcularSaldoRetenidoTx(tx, userId) {
     // Subastas del usuario y estados
-    const offers = await tx.offer.findMany({
+    const guarantees = await tx.guarantee.findMany({
       where: { user_id: userId },
       select: {
         auction: { select: { id: true, estado: true } },
@@ -484,7 +548,7 @@ class RefundService {
 
     // RN07: Estados que retienen. 'penalizada' NO retiene porque ya se aplicó la penalidad
     const retenedorStates = new Set(['finalizada', 'ganada', 'perdida']);
-    const auctionIdsToRetain = offers
+    const auctionIdsToRetain = guarantees
       .filter((o) => o.auction && retenedorStates.has(o.auction.estado))
       .map((o) => o.auction.id);
 

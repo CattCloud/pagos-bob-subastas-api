@@ -77,7 +77,7 @@ NODE_ENV=development
 SESSION_SECRET=tu_clave_secreta_muy_segura
 
 # FRONTEND
-FRONTEND_URL=http://localhost:5173
+FRONTEND_URL=http://localhost:5174
 
 # EMAILJS (Server-to-Server)
 EMAILJS_SERVICE_ID=service_xxxxxx

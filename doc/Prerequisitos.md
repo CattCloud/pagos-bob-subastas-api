@@ -242,7 +242,7 @@ Tienen roles y permisos completamente diferentes:
 
 - Todo movimiento de dinero DEBE registrarse como transacción en Movement
 - Las transacciones tienen tipo general (entrada/salida) y específico (pago_garantia, reembolso, penalidad, ajuste_manual)
-- Las referencias a otras entidades se manejan a través de Movement_References
+- Las referencias a otras entidades se manejan con FKs directas en Movement: auction_id_ref, guarantee_id_ref, refund_id_ref (no existe tabla Movement_References)
 - **CRÍTICO:** Movement y Billing son independientes - NO crear Movement automático al crear Billing
 
 **RN05 - Cálculo de Saldos:**
@@ -385,7 +385,7 @@ Cuando el ganador original no realiza el pago antes del límite:
 - updated_at
 - deleted_at
 
-### **ENTIDAD 2: Auction **
+### **ENTIDAD 2: Auction**
 
 **Representa**: Subastas que **YA terminaron** (tiempo agotado) pero pueden tener diferentes estados:
 - `activa`: Se registro la subasta pero aun no se registra un ganador
@@ -433,20 +433,15 @@ Cuando el ganador original no realiza el pago antes del límite:
 - numero_operacion VARCHAR(100) NULL
 - created_at DATETIME
 - updated_at DATETIME
+- auction_id_ref (FK opcional) — referencia a Auction.id vinculada al movimiento
+- guarantee_id_ref (FK opcional) — referencia a Guarantee.id vinculada al movimiento
+- refund_id_ref (FK opcional) — referencia a Refund.id vinculada al movimiento
 
-### **ENTIDAD 4: Movement_References (REFERENCIAS GENÉRICAS)**
+Notas:
+- El diseño elimina la tabla Movement_References para simplificar integridad y consultas.
+- Algunas respuestas públicas siguen exponiendo “references” como arreglo computado (type/id) para compatibilidad, pero la persistencia es por FKs directas.
 
-**Representa:** Referencias de transacciones a otras entidades
-
-**Atributos:**
-
-- id (PK)
-- movement_id (FK) -- Apunta a Movement
-- reference_type VARCHAR(50) -- 'auction', 'guarantee', 'refund'
-- reference_id INT -- ID de la entidad referenciada
-- created_at DATETIME
-
-### **ENTIDAD 5: Billing (FACTURACIÓN)**
+### **ENTIDAD 4: Billing (FACTURACIÓN)**
 
 **Representa:** Facturas generadas cuando BOB gana competencia externa
 

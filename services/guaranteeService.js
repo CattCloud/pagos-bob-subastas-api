@@ -258,12 +258,7 @@ class GuaranteeService {
           user_id: userId,
           tipo_movimiento_general: 'entrada',
           tipo_movimiento_especifico: 'pago_garantia',
-          references: {
-            some: {
-              reference_type: 'auction',
-              reference_id: guarantee.auction.id,
-            },
-          },
+          auction_id_ref: guarantee.auction.id,
         },
         orderBy: { created_at: 'desc' },
       });

@@ -132,7 +132,7 @@ class MovementService {
         }
       }
 
-      // 7) Crear Movement pendiente
+      // 7) Crear Movement pendiente con referencias directas
       const movement = await tx.movement.create({
         data: {
           user_id: userId,
@@ -147,23 +147,9 @@ class MovementService {
           estado: 'pendiente',
           fecha_pago: paymentDate,
           numero_operacion: numero_operacion ?? null,
+          auction_id_ref: auction_id,
+          guarantee_id_ref: userGuarantee.id,
         },
-      });
-
-      // 8) Referencias (auction, guarantee)
-      await tx.movementReference.createMany({
-        data: [
-          {
-            movement_id: movement.id,
-            reference_type: 'auction',
-            reference_id: auction_id,
-          },
-          {
-            movement_id: movement.id,
-            reference_type: 'guarantee',
-            reference_id: userGuarantee.id,
-          },
-        ],
       });
 
       // 9) Cambiar estado de subasta -> 'en_validacion'
@@ -212,7 +198,6 @@ class MovementService {
         where: { id: movementId },
         include: {
           user: true,
-          references: true,
         },
       });
       if (!movement) throw new NotFoundError('Movement');
@@ -240,9 +225,8 @@ class MovementService {
         },
       });
 
-      // Identificar auction_id desde referencias
-      const auctionRef = movement.references.find((r) => r.reference_type === 'auction');
-      const auction_id = auctionRef?.reference_id;
+      // Identificar auction_id desde referencia directa
+      const auction_id = movement.auction_id_ref;
       if (!auction_id) {
         throw new ConflictError('Movement sin referencia a subasta', 'MISSING_AUCTION_REFERENCE');
       }
@@ -304,7 +288,6 @@ class MovementService {
         where: { id: movementId },
         include: {
           user: true,
-          references: true,
         },
       });
       if (!movement) throw new NotFoundError('Movement');
@@ -337,8 +320,7 @@ class MovementService {
       });
 
       // Auction back to 'pendiente'
-      const auctionRef = movement.references.find((r) => r.reference_type === 'auction');
-      const auction_id = auctionRef?.reference_id;
+      const auction_id = movement.auction_id_ref;
       if (!auction_id) {
         throw new ConflictError('Movement sin referencia a subasta', 'MISSING_AUCTION_REFERENCE');
       }
@@ -418,10 +400,68 @@ class MovementService {
       if (fecha_hasta) where.created_at.lte = new Date(fecha_hasta);
     }
 
+    // include (opt-in): include=auction,user,refund,guarantee
+    const includeKeysRaw = filters?.include || '';
+    const includeSet = new Set(
+      String(includeKeysRaw)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+
+    const includePrisma = {};
+    if (includeSet.has('user')) {
+      includePrisma.user = {
+        select: {
+          first_name: true,
+          last_name: true,
+          document_type: true,
+          document_number: true,
+        },
+      };
+    }
+    if (includeSet.has('auction')) {
+      includePrisma.auction_ref = {
+        select: {
+          id: true,
+          estado: true,
+          asset: {
+            select: {
+              empresa_propietaria: true,
+              marca: true,
+              modelo: true,
+              año: true,
+              placa: true,
+            },
+          },
+        },
+      };
+    }
+    if (includeSet.has('guarantee')) {
+      includePrisma.guarantee_ref = {
+        select: {
+          id: true,
+          auction_id: true,
+          user_id: true,
+          posicion_ranking: true,
+        },
+      };
+    }
+    if (includeSet.has('refund')) {
+      includePrisma.refund_ref = {
+        select: {
+          id: true,
+          estado: true,
+          tipo_reembolso: true,
+        },
+      };
+    }
+    const prismaInclude = Object.keys(includePrisma).length ? includePrisma : undefined;
+
     const [movs, total] = await Promise.all([
       prisma.movement.findMany({
         where,
-        include: { references: true },
+        include: prismaInclude,
         orderBy: { created_at: 'desc' },
         skip,
         take: Number(limit),
@@ -429,19 +469,67 @@ class MovementService {
       prisma.movement.count({ where }),
     ]);
 
-    const formatted = movs.map((m) => ({
-      id: m.id,
-      tipo_movimiento_general: m.tipo_movimiento_general,
-      tipo_movimiento_especifico: m.tipo_movimiento_especifico,
-      monto: m.monto,
-      estado: m.estado,
-      numero_operacion: m.numero_operacion,
-      created_at: m.created_at,
-      references: m.references?.map((r) => ({
-        type: r.reference_type,
-        id: r.reference_id,
-      })),
-    }));
+    const formatted = movs.map((m) => {
+      const base = {
+        id: m.id,
+        tipo_movimiento_general: m.tipo_movimiento_general,
+        tipo_movimiento_especifico: m.tipo_movimiento_especifico,
+        monto: m.monto,
+        estado: m.estado,
+        concepto: m.concepto,
+        numero_operacion: m.numero_operacion,
+        created_at: m.created_at,
+        references: [
+          ...(m.auction_id_ref ? [{ type: 'auction', id: m.auction_id_ref }] : []),
+          ...(m.guarantee_id_ref ? [{ type: 'guarantee', id: m.guarantee_id_ref }] : []),
+          ...(m.refund_id_ref ? [{ type: 'refund', id: m.refund_id_ref }] : []),
+        ],
+      };
+
+      // related (opt-in vía include)
+      if (includeSet.size > 0) {
+        const related = {};
+        if (includeSet.has('user') && m.user) {
+          related.user = {
+            first_name: m.user.first_name,
+            last_name: m.user.last_name,
+            document_type: m.user.document_type,
+            document_number: m.user.document_number,
+          };
+        }
+        if (includeSet.has('auction') && m.auction_ref) {
+          related.auction = {
+            id: m.auction_ref.id,
+            estado: m.auction_ref.estado,
+            empresa_propietaria: m.auction_ref.asset?.empresa_propietaria ?? null,
+            marca: m.auction_ref.asset?.marca ?? null,
+            modelo: m.auction_ref.asset?.modelo ?? null,
+            año: m.auction_ref.asset?.año ?? null,
+            placa: m.auction_ref.asset?.placa ?? null,
+          };
+        }
+        if (includeSet.has('guarantee') && m.guarantee_ref) {
+          related.guarantee = {
+            id: m.guarantee_ref.id,
+            auction_id: m.guarantee_ref.auction_id,
+            user_id: m.guarantee_ref.user_id,
+            posicion_ranking: m.guarantee_ref.posicion_ranking ?? null,
+          };
+        }
+        if (includeSet.has('refund') && m.refund_ref) {
+          related.refund = {
+            id: m.refund_ref.id,
+            estado: m.refund_ref.estado,
+            tipo_reembolso: m.refund_ref.tipo_reembolso,
+          };
+        }
+        if (Object.keys(related).length > 0) {
+          base.related = related;
+        }
+      }
+
+      return base;
+    });
 
     return {
       movements: formatted,
@@ -455,20 +543,129 @@ class MovementService {
   }
 
   /**
-   * Obtener detalle de movement
+   * Obtener detalle de movement (con include opt-in)
+   * include CSV: auction,user,refund,guarantee
    */
-  async getMovementById(movementId, userRole = 'client', userId = null) {
+  async getMovementById(movementId, userRole = 'client', userId = null, includeRaw = '') {
+    // Parse include
+    const includeSet = new Set(
+      String(includeRaw)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+  
+    const includePrisma = {};
+    if (includeSet.has('user')) {
+      includePrisma.user = {
+        select: {
+          first_name: true,
+          last_name: true,
+          document_type: true,
+          document_number: true,
+        },
+      };
+    }
+    if (includeSet.has('auction')) {
+      includePrisma.auction_ref = {
+        select: {
+          id: true,
+          estado: true,
+          asset: {
+            select: {
+              empresa_propietaria: true,
+              marca: true,
+              modelo: true,
+              año: true,
+              placa: true,
+            },
+          },
+        },
+      };
+    }
+    if (includeSet.has('guarantee')) {
+      includePrisma.guarantee_ref = {
+        select: {
+          id: true,
+          auction_id: true,
+          user_id: true,
+          posicion_ranking: true,
+        },
+      };
+    }
+    if (includeSet.has('refund')) {
+      includePrisma.refund_ref = {
+        select: {
+          id: true,
+          estado: true,
+          tipo_reembolso: true,
+        },
+      };
+    }
+  
+    const prismaInclude = Object.keys(includePrisma).length ? includePrisma : undefined;
+  
     const m = await prisma.movement.findUnique({
       where: { id: movementId },
-      include: { references: true, user: true },
+      include: prismaInclude,
     });
     if (!m) throw new NotFoundError('Movement');
-
+  
     if (userRole === 'client' && userId && m.user_id !== userId) {
       throw new ConflictError('No tiene permisos para ver este movement', 'FORBIDDEN');
     }
-
-    return m;
+  
+    const result = {
+      ...m,
+      references: [
+        ...(m.auction_id_ref ? [{ type: 'auction', id: m.auction_id_ref }] : []),
+        ...(m.guarantee_id_ref ? [{ type: 'guarantee', id: m.guarantee_id_ref }] : []),
+        ...(m.refund_id_ref ? [{ type: 'refund', id: m.refund_id_ref }] : []),
+      ],
+    };
+  
+    if (includeSet.size > 0) {
+      const related = {};
+      if (includeSet.has('user') && m.user) {
+        related.user = {
+          first_name: m.user.first_name,
+          last_name: m.user.last_name,
+          document_type: m.user.document_type,
+          document_number: m.user.document_number,
+        };
+      }
+      if (includeSet.has('auction') && m.auction_ref) {
+        related.auction = {
+          id: m.auction_ref.id,
+          estado: m.auction_ref.estado,
+          empresa_propietaria: m.auction_ref.asset?.empresa_propietaria ?? null,
+          marca: m.auction_ref.asset?.marca ?? null,
+          modelo: m.auction_ref.asset?.modelo ?? null,
+          año: m.auction_ref.asset?.año ?? null,
+          placa: m.auction_ref.asset?.placa ?? null,
+        };
+      }
+      if (includeSet.has('guarantee') && m.guarantee_ref) {
+        related.guarantee = {
+          id: m.guarantee_ref.id,
+          auction_id: m.guarantee_ref.auction_id,
+          user_id: m.guarantee_ref.user_id,
+          posicion_ranking: m.guarantee_ref.posicion_ranking ?? null,
+        };
+      }
+      if (includeSet.has('refund') && m.refund_ref) {
+        related.refund = {
+          id: m.refund_ref.id,
+          estado: m.refund_ref.estado,
+          tipo_reembolso: m.refund_ref.tipo_reembolso,
+        };
+      }
+      if (Object.keys(related).length > 0) {
+        result.related = related;
+      }
+    }
+  
+    return result;
   }
 
   // -----------------------
@@ -544,12 +741,7 @@ class MovementService {
         estado: 'validado',
         tipo_movimiento_general: 'entrada',
         tipo_movimiento_especifico: 'pago_garantia',
-        references: {
-          some: {
-            reference_type: 'auction',
-            reference_id: { in: auctionIdsToRetain },
-          },
-        },
+        auction_id_ref: { in: auctionIdsToRetain },
       },
       select: { monto: true },
     });
@@ -560,12 +752,7 @@ class MovementService {
         user_id: userId,
         estado: 'validado',
         tipo_movimiento_especifico: 'reembolso',
-        references: {
-          some: {
-            reference_type: 'auction',
-            reference_id: { in: auctionIdsToRetain },
-          },
-        },
+        auction_id_ref: { in: auctionIdsToRetain },
       },
       select: { monto: true },
     });

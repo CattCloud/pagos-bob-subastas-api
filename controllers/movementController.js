@@ -83,13 +83,15 @@ const listMovements = asyncHandler(async (req, res) => {
  */
 const getMovementById = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const { include = '' } = req.query;
 
-  Logger.info(`Detalle movement ${id} - ${req.user.user_type}: ${req.user.email}`);
+  Logger.info(`Detalle movement ${id} - ${req.user.user_type}: ${req.user.email}`, { include });
 
   const movement = await movementService.getMovementById(
     id,
     req.user.user_type,
-    req.user.id
+    req.user.id,
+    include
   );
 
   res.status(200).json({

@@ -88,7 +88,7 @@ class RefundService {
               estado: 'validado',
               tipo_movimiento_general: 'entrada',
               tipo_movimiento_especifico: 'pago_garantia',
-              references: { some: { reference_type: 'auction', reference_id: auction_id } },
+              auction_id_ref: auction_id ,
             },
           }),
           tx.movement.aggregate({
@@ -98,7 +98,7 @@ class RefundService {
               estado: 'validado',
               tipo_movimiento_general: 'salida',
               tipo_movimiento_especifico: 'reembolso',
-              references: { some: { reference_type: 'auction', reference_id: auction_id } },
+              auction_id_ref: auction_id ,
             },
           }),
         ]);
@@ -298,7 +298,7 @@ class RefundService {
                 estado: 'validado',
                 tipo_movimiento_general: 'entrada',
                 tipo_movimiento_especifico: 'pago_garantia',
-                references: { some: { reference_type: 'auction', reference_id: a.id } },
+                auction_id_ref: a.id ,
               },
             }),
             tx.movement.aggregate({
@@ -308,7 +308,7 @@ class RefundService {
                 estado: 'validado',
                 tipo_movimiento_general: 'salida',
                 tipo_movimiento_especifico: 'reembolso',
-                references: { some: { reference_type: 'auction', reference_id: a.id } },
+                auction_id_ref: a.id ,
               },
             }),
           ]);
@@ -346,7 +346,7 @@ class RefundService {
               estado: 'validado',
               tipo_movimiento_general: 'entrada',
               tipo_movimiento_especifico: 'pago_garantia',
-              references: { some: { reference_type: 'auction', reference_id: auctionIdForRefund } },
+              auction_id_ref: auctionIdForRefund ,
             },
           }),
           tx.movement.aggregate({
@@ -356,7 +356,7 @@ class RefundService {
               estado: 'validado',
               tipo_movimiento_general: 'salida',
               tipo_movimiento_especifico: 'reembolso',
-              references: { some: { reference_type: 'auction', reference_id: auctionIdForRefund } },
+              auction_id_ref: auctionIdForRefund ,
             },
           }),
         ]);
@@ -371,11 +371,11 @@ class RefundService {
         }
       }
 
-      // Nota: Evitamos persistir auction_id en Refund para no depender de regenerar Prisma Client.
-      // La trazabilidad y el cálculo de retenido se basan en MovementReferences (auction/refund),
-      // por lo que no es necesario actualizar el campo en Refund para el correcto funcionamiento.
+      // Nota: Evitamos persistir auction_id en Refund para no acoplarlo al flujo.
+      // La trazabilidad y el cálculo de retenido se basan ahora en referencias directas en Movement
+      // (auction_id_ref/refund_id_ref), por lo que no es necesario actualizar el campo en Refund.
 
-      // Crear Movement validado
+      // Crear Movement validado con referencias directas
       const movement = await tx.movement.create({
         data: {
           user_id: userId,
@@ -392,12 +392,8 @@ class RefundService {
           fecha_resolucion: new Date(),
           motivo_rechazo: null,
           numero_operacion: movementNumeroOperacion,
-          references: {
-            create: [
-              ...(auctionIdForRefund ? [{ reference_type: 'auction', reference_id: auctionIdForRefund }] : []),
-              { reference_type: 'refund', reference_id: refundId },
-            ],
-          },
+          auction_id_ref: auctionIdForRefund ?? null,
+          refund_id_ref: refundId,
         },
       });
 
@@ -561,12 +557,7 @@ class RefundService {
           estado: 'validado',
           tipo_movimiento_general: 'entrada',
           tipo_movimiento_especifico: 'pago_garantia',
-          references: {
-            some: {
-              reference_type: 'auction',
-              reference_id: { in: auctionIdsToRetain },
-            },
-          },
+          auction_id_ref: { in: auctionIdsToRetain },
         },
         select: { monto: true },
       });
@@ -582,12 +573,7 @@ class RefundService {
           estado: 'validado',
           // Considerar cualquier 'reembolso' (salida o entrada mantener_saldo) para liberar retenido
           tipo_movimiento_especifico: 'reembolso',
-          references: {
-            some: {
-              reference_type: 'auction',
-              reference_id: { in: auctionIdsToRetain },
-            },
-          },
+          auction_id_ref: { in: auctionIdsToRetain },
         },
         select: { monto: true },
       });

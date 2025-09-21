@@ -98,12 +98,7 @@ class BillingService {
           estado: 'validado',
           tipo_movimiento_general: 'entrada',
           tipo_movimiento_especifico: 'pago_garantia',
-          references: {
-            some: {
-              reference_type: 'auction',
-              reference_id: auction_id,
-            },
-          },
+          auction_id_ref: auction_id,
         },
       });
 
@@ -226,12 +221,7 @@ class BillingService {
         estado: 'validado',
         tipo_movimiento_general: 'entrada',
         tipo_movimiento_especifico: 'pago_garantia',
-        references: {
-          some: {
-            reference_type: 'auction',
-            reference_id: { in: auctionIdsToRetain },
-          },
-        },
+        auction_id_ref: { in: auctionIdsToRetain },
       },
       select: { monto: true },
     });

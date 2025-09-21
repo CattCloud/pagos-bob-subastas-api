@@ -339,12 +339,7 @@ class AuctionService {
     // Verificar que no tenga movements de pago_garantia asociados
     const movementsCount = await prisma.movement.count({
       where: {
-        references: {
-          some: {
-            reference_type: 'auction',
-            reference_id: auctionId,
-          },
-        },
+        auction_id_ref: auctionId,
         tipo_movimiento_especifico: 'pago_garantia',
       },
     });
@@ -488,12 +483,7 @@ class AuctionService {
               estado: 'validado',
               tipo_movimiento_general: 'entrada',
               tipo_movimiento_especifico: 'pago_garantia',
-              references: {
-                some: {
-                  reference_type: 'auction',
-                  reference_id: { in: auctionIdsToRetain },
-                },
-              },
+              auction_id_ref: { in: auctionIdsToRetain },
             },
             select: { monto: true },
           });
@@ -509,12 +499,7 @@ class AuctionService {
               estado: 'validado',
               tipo_movimiento_general: 'salida',
               tipo_movimiento_especifico: 'reembolso',
-              references: {
-                some: {
-                  reference_type: 'auction',
-                  reference_id: { in: auctionIdsToRetain },
-                },
-              },
+              auction_id_ref: { in: auctionIdsToRetain },
             },
             select: { monto: true },
           });
@@ -605,9 +590,7 @@ class AuctionService {
               estado: 'validado',
               tipo_movimiento_general: 'entrada',
               tipo_movimiento_especifico: 'pago_garantia',
-              references: {
-                some: { reference_type: 'auction', reference_id: auctionId },
-              },
+              auction_id_ref: auctionId,
             },
           });
           const garantiaTotal = Number(agg._sum.monto || 0);
@@ -630,11 +613,7 @@ class AuctionService {
                 fecha_resolucion: new Date(),
                 motivo_rechazo: null,
                 numero_operacion: null,
-                references: {
-                  create: [
-                    { reference_type: 'auction', reference_id: auctionId },
-                  ],
-                },
+                auction_id_ref: auctionId,
               },
             });
 

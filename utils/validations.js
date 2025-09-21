@@ -212,6 +212,8 @@ const movementSchemas = {
       Joi.string().valid('pendiente', 'validado', 'rechazado'),
       Joi.string().custom((value) => value.split(',').map(s => s.trim()))
     ).optional(),
+    // Param opcional para enriquecer respuesta: include=auction,user,refund,guarantee
+    include: Joi.string().max(100).optional(),
   }).concat(pagination).concat(dateRange),
 };
 // CONSULTAS Y FILTROS

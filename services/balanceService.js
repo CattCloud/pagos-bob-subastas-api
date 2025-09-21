@@ -103,10 +103,69 @@ class BalanceService {
       if (fecha_hasta) where.created_at.lte = new Date(fecha_hasta);
     }
 
+    // include (opt-in): include=auction,user,refund,guarantee
+    const includeKeysRaw = filters?.include || '';
+    const includeSet = new Set(
+      String(includeKeysRaw)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+
+    const includePrisma = {};
+    if (includeSet.has('user')) {
+      includePrisma.user = {
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          document_type: true,
+          document_number: true,
+        },
+      };
+    }
+    if (includeSet.has('auction')) {
+      includePrisma.auction_ref = {
+        select: {
+          id: true,
+          estado: true,
+          asset: {
+            select: {
+              empresa_propietaria: true,
+              marca: true,
+              modelo: true,
+              año: true,
+              placa: true,
+            },
+          },
+        },
+      };
+    }
+    if (includeSet.has('guarantee')) {
+      includePrisma.guarantee_ref = {
+        select: {
+          id: true,
+          auction_id: true,
+          user_id: true,
+          posicion_ranking: true,
+        },
+      };
+    }
+    if (includeSet.has('refund')) {
+      includePrisma.refund_ref = {
+        select: {
+          id: true,
+          estado: true,
+          tipo_reembolso: true,
+        },
+      };
+    }
+    const prismaInclude = Object.keys(includePrisma).length ? includePrisma : undefined;
+
     const [movements, total] = await Promise.all([
       prisma.movement.findMany({
         where,
-        include: { references: true },
+        include: prismaInclude,
         orderBy: { created_at: 'desc' },
         skip: offset,
         take: parseInt(limit),
@@ -115,11 +174,7 @@ class BalanceService {
     ]);
 
     const formattedMovements = movements.map((m) => {
-      const auctionRef = (m.references || []).find((r) => r.reference_type === 'auction');
-      const guaranteeRef = (m.references || []).find((r) => r.reference_type === 'guarantee');
-      const refundRef = (m.references || []).find((r) => r.reference_type === 'refund');
-
-      return {
+      const base = {
         id: m.id,
         tipo_movimiento_general: m.tipo_movimiento_general,
         tipo_movimiento_especifico: m.tipo_movimiento_especifico,
@@ -132,11 +187,54 @@ class BalanceService {
         motivo_rechazo: m.motivo_rechazo,
         created_at: m.created_at,
         references: {
-          auction_id: auctionRef?.reference_id || null,
-          guarantee_id: guaranteeRef?.reference_id || null,
-          refund_id: refundRef?.reference_id || null,
+          auction_id: m.auction_id_ref || null,
+          guarantee_id: m.guarantee_id_ref || null,
+          refund_id: m.refund_id_ref || null,
         },
       };
+
+      if (includeSet.size > 0) {
+        const related = {};
+        if (includeSet.has('user') && m.user) {
+          related.user = {
+            first_name: m.user.first_name,
+            last_name: m.user.last_name,
+            document_type: m.user.document_type,
+            document_number: m.user.document_number,
+          };
+        }
+        if (includeSet.has('auction') && m.auction_ref) {
+          related.auction = {
+            id: m.auction_ref.id,
+            estado: m.auction_ref.estado,
+            empresa_propietaria: m.auction_ref.asset?.empresa_propietaria ?? null,
+            marca: m.auction_ref.asset?.marca ?? null,
+            modelo: m.auction_ref.asset?.modelo ?? null,
+            año: m.auction_ref.asset?.año ?? null,
+            placa: m.auction_ref.asset?.placa ?? null,
+          };
+        }
+        if (includeSet.has('guarantee') && m.guarantee_ref) {
+          related.guarantee = {
+            id: m.guarantee_ref.id,
+            auction_id: m.guarantee_ref.auction_id,
+            user_id: m.guarantee_ref.user_id,
+            posicion_ranking: m.guarantee_ref.posicion_ranking ?? null,
+          };
+        }
+        if (includeSet.has('refund') && m.refund_ref) {
+          related.refund = {
+            id: m.refund_ref.id,
+            estado: m.refund_ref.estado,
+            tipo_reembolso: m.refund_ref.tipo_reembolso,
+          };
+        }
+        if (Object.keys(related).length > 0) {
+          base.related = related;
+        }
+      }
+
+      return base;
     });
 
     const pagination = paginationHelpers.generatePaginationMeta(page, limit, total);
@@ -346,14 +444,7 @@ class BalanceService {
         },
       });
 
-      // Referencia al propio usuario (opcional)
-      await tx.movementReference.create({
-        data: {
-          movement_id: movement.id,
-          reference_type: 'user',
-          reference_id: userId,
-        },
-      });
+      // Sin referencias adicionales; Movement usa FKs directos (auction_id_ref, guarantee_id_ref, refund_id_ref)
 
       // Recalcular cache de saldo_total y saldo_retenido
       const saldo_total = await this._recalcularSaldoTotalTx(tx, userId);
@@ -440,12 +531,7 @@ class BalanceService {
           estado: 'validado',
           tipo_movimiento_general: 'entrada',
           tipo_movimiento_especifico: 'pago_garantia',
-          references: {
-            some: {
-              reference_type: 'auction',
-              reference_id: { in: auctionIdsToRetain },
-            },
-          },
+          auction_id_ref: { in: auctionIdsToRetain },
         },
         select: { monto: true },
       });
@@ -461,12 +547,7 @@ class BalanceService {
           estado: 'validado',
           tipo_movimiento_general: 'salida',
           tipo_movimiento_especifico: 'reembolso',
-          references: {
-            some: {
-              reference_type: 'auction',
-              reference_id: { in: auctionIdsToRetain },
-            },
-          },
+          auction_id_ref: { in: auctionIdsToRetain },
         },
         select: { monto: true },
       });

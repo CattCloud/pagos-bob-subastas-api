@@ -12,41 +12,41 @@ datasource db {
 }
 
 model User {
-  id              String  @id @default(cuid())
+  id              String    @id @default(cuid())
   first_name      String
   last_name       String
-  email           String  @unique
+  email           String    @unique
   phone_number    String?
   document_type   String? // DNI, CE, RUC, Pasaporte - nullable para admin
-  document_number String  @unique // Para identificación de clientes
-  user_type       String  @default("client") // admin/client
-  saldo_total     Decimal @default(0) @db.Decimal(10, 2)
-  saldo_retenido  Decimal @default(0) @db.Decimal(10, 2)
-  created_at      DateTime @default(now())
-  updated_at      DateTime @updatedAt
+  document_number String    @unique // Para identificación de clientes
+  user_type       String    @default("client") // admin/client
+  saldo_total     Decimal   @default(0) @db.Decimal(10, 2)
+  saldo_retenido  Decimal   @default(0) @db.Decimal(10, 2)
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
   deleted_at      DateTime?
 
   // Relaciones
-  guarantees      Guarantee[]
-  movements       Movement[]
-  refunds         Refund[]
-  billings        Billing[]
-  notifications   Notification[]
+  guarantees    Guarantee[]
+  movements     Movement[]
+  refunds       Refund[]
+  billings      Billing[]
+  notifications Notification[]
 
   @@map("users")
 }
 
 model Asset {
-  id                    String   @id @default(cuid())
-  placa                 String   @unique
-  empresa_propietaria   String
-  marca                 String?
-  modelo                String?
-  año                   Int?
-  estado                String   @default("disponible") // disponible, vendido, retirado
-  descripcion           String?
-  created_at            DateTime @default(now())
-  updated_at            DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  placa               String   @unique
+  empresa_propietaria String
+  marca               String?
+  modelo              String?
+  año                Int?
+  estado              String   @default("disponible") // disponible, vendido, retirado
+  descripcion         String?
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
 
   // Relaciones
   auctions Auction[]
@@ -55,116 +55,109 @@ model Asset {
 }
 
 model Auction {
-  id                       String    @id @default(cuid())
-  asset_id                 String
-  fecha_resultado_general  DateTime?
-  estado                   AuctionEstado    @default(activa)
-  id_offerWin              String?   // ID de la oferta ganadora
-  finished_at              DateTime?
-  created_at               DateTime  @default(now())
-  updated_at               DateTime  @updatedAt
+  id                      String        @id @default(cuid())
+  asset_id                String
+  fecha_resultado_general DateTime?
+  estado                  AuctionEstado @default(activa)
+  id_offerWin             String? // ID de la oferta ganadora
+  finished_at             DateTime?
+  created_at              DateTime      @default(now())
+  updated_at              DateTime      @updatedAt
 
   // Relaciones
-  asset               Asset     @relation(fields: [asset_id], references: [id], onDelete: Cascade)
-  guarantees          Guarantee[]
-  billings            Billing[]
-  refunds             Refund[]
+  asset         Asset       @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+  guarantees    Guarantee[]
+  billings      Billing[]
+  refunds       Refund[]
+  movements_ref Movement[]  @relation("MovementAuctionRef")
 
   @@map("auctions")
 }
 
 model Guarantee {
-  id                        String    @id @default(cuid())
-  auction_id                String
-  user_id                   String
-  monto_oferta              Decimal   @db.Decimal(10, 2)
-  posicion_ranking          Int?      // 1=ganador, 2=segundo, etc.
-  estado                    String    @default("activa") // activa, ganadora, perdedora
-  fecha_limite_pago         DateTime?
-  created_at                DateTime  @default(now())
-  updated_at                DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  auction_id        String
+  user_id           String
+  monto_oferta      Decimal   @db.Decimal(10, 2)
+  posicion_ranking  Int? // 1=ganador, 2=segundo, etc.
+  estado            String    @default("activa") // activa, ganadora, perdedora
+  fecha_limite_pago DateTime?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
 
   // Relaciones
-  auction           Auction            @relation(fields: [auction_id], references: [id], onDelete: Cascade)
-  user              User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  auction       Auction    @relation(fields: [auction_id], references: [id], onDelete: Cascade)
+  user          User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  movements_ref Movement[] @relation("MovementGuaranteeRef")
 
   @@map("guarantees")
 }
 
-
-
 model Movement {
-  id                        String   @id @default(cuid())
-  user_id                   String
-  tipo_movimiento_general   MovementGeneral
+  id                         String          @id @default(cuid())
+  user_id                    String
+  tipo_movimiento_general    MovementGeneral
   tipo_movimiento_especifico String
-  monto                     Decimal  @db.Decimal(10, 2)
-  moneda                    String   @default("USD")
-  tipo_pago                 TipoPago?
-  numero_cuenta_origen      String?
-  voucher_url               String?
-  concepto                  String
-  estado                    MovementEstado
-  fecha_pago                DateTime?
-  fecha_resolucion          DateTime?
-  motivo_rechazo            String?
-  numero_operacion          String?
-  created_at                DateTime @default(now())
-  updated_at                DateTime @updatedAt
+  monto                      Decimal         @db.Decimal(10, 2)
+  moneda                     String          @default("USD")
+  tipo_pago                  TipoPago?
+  numero_cuenta_origen       String?
+  voucher_url                String?
+  concepto                   String
+  estado                     MovementEstado
+  fecha_pago                 DateTime?
+  fecha_resolucion           DateTime?
+  motivo_rechazo             String?
+  numero_operacion           String?
+  auction_id_ref             String?
+  guarantee_id_ref           String?
+  refund_id_ref              String?
+  created_at                 DateTime        @default(now())
+  updated_at                 DateTime        @updatedAt
 
   // Relaciones
-  user        User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  references  MovementReference[]
+  user          User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  auction_ref   Auction?   @relation(name: "MovementAuctionRef", fields: [auction_id_ref], references: [id], onDelete: Cascade)
+  guarantee_ref Guarantee? @relation(name: "MovementGuaranteeRef", fields: [guarantee_id_ref], references: [id], onDelete: Cascade)
+  refund_ref    Refund?    @relation(name: "MovementRefundRef", fields: [refund_id_ref], references: [id], onDelete: Cascade)
 
   @@map("movements")
 }
 
 model Refund {
-  id                        String    @id @default(cuid())
-  user_id                   String
-  auction_id                String?   
-  monto_solicitado          Decimal   @db.Decimal(10, 2)
-  tipo_reembolso            String    // mantener_saldo, devolver_dinero
-  estado                    String    @default("solicitado") // solicitado, confirmado, rechazado, procesado, cancelado
-  fecha_solicitud           DateTime  @default(now())
-  fecha_respuesta_empresa   DateTime?
-  fecha_procesamiento       DateTime?
-  motivo                    String?
-  created_at                DateTime  @default(now())
-  updated_at                DateTime  @updatedAt
+  id                      String    @id @default(cuid())
+  user_id                 String
+  auction_id              String?
+  monto_solicitado        Decimal   @db.Decimal(10, 2)
+  tipo_reembolso          String // mantener_saldo, devolver_dinero
+  estado                  String    @default("solicitado") // solicitado, confirmado, rechazado, procesado, cancelado
+  fecha_solicitud         DateTime  @default(now())
+  fecha_respuesta_empresa DateTime?
+  fecha_procesamiento     DateTime?
+  motivo                  String?
+  created_at              DateTime  @default(now())
+  updated_at              DateTime  @updatedAt
 
   // Relaciones
-  user      User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  auction   Auction? @relation(fields: [auction_id], references: [id], onDelete: Cascade)
+  user          User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  auction       Auction?   @relation(fields: [auction_id], references: [id], onDelete: Cascade)
+  movements_ref Movement[] @relation("MovementRefundRef")
 
   @@map("refunds")
 }
 
-model MovementReference {
-  id              String   @id @default(cuid())
-  movement_id     String
-  reference_type  String   // 'auction', 'guarantee', 'refund', 'user'
-  reference_id    String
-  created_at      DateTime @default(now())
-
-  // Relaciones
-  movement Movement @relation(fields: [movement_id], references: [id], onDelete: Cascade)
-
-  @@map("movement_references")
-}
-
 model Billing {
-  id                       String   @id @default(cuid())
-  user_id                  String
-  billing_document_type    BillingDocumentType
-  billing_document_number  String
-  billing_name             String
-  monto                    Decimal  @db.Decimal(10, 2)
-  moneda                   String   @default("USD")
-  concepto                 String   // Ej: "Compra vehículo ... - Subasta #15"
-  auction_id               String
-  created_at               DateTime @default(now())
-  updated_at               DateTime @updatedAt
+  id                      String              @id @default(cuid())
+  user_id                 String
+  billing_document_type   BillingDocumentType
+  billing_document_number String
+  billing_name            String
+  monto                   Decimal             @db.Decimal(10, 2)
+  moneda                  String              @default("USD")
+  concepto                String // Ej: "Compra vehículo ... - Subasta #15"
+  auction_id              String
+  created_at              DateTime            @default(now())
+  updated_at              DateTime            @updatedAt
 
   // Relaciones
   user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
@@ -174,7 +167,7 @@ model Billing {
 }
 
 model Notification {
-  id             String   @id @default(cuid())
+  id             String             @id @default(cuid())
   user_id        String
   tipo           NotificationTipo
   titulo         String
@@ -183,12 +176,12 @@ model Notification {
   email_status   EmailStatus        @default(pendiente)
   reference_type String?
   reference_id   String?
-  fecha_creacion DateTime @default(now())
+  fecha_creacion DateTime           @default(now())
   fecha_vista    DateTime?
   email_sent_at  DateTime?
   email_error    String?
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
+  created_at     DateTime           @default(now())
+  updated_at     DateTime           @updatedAt
 
   // Relaciones
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)

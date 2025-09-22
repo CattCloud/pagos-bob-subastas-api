@@ -187,7 +187,223 @@ class BillingService {
       };
     });
   }
-
+ 
+  // ---------------------------------------
+  // Listados y detalle con include opt-in
+  // ---------------------------------------
+ 
+  _buildIncludeForBilling(includeRaw = '') {
+    const includeSet = new Set(
+      String(includeRaw)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+ 
+    const includePrisma = {};
+    if (includeSet.has('user')) {
+      includePrisma.user = {
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          document_type: true,
+          document_number: true,
+        },
+      };
+    }
+    if (includeSet.has('auction')) {
+      includePrisma.auction = {
+        select: {
+          id: true,
+          estado: true,
+          fecha_resultado_general: true,
+          asset: {
+            select: {
+              placa: true,
+              empresa_propietaria: true,
+              marca: true,
+              modelo: true,
+              año: true,
+              descripcion: true,
+            },
+          },
+        },
+      };
+    }
+ 
+    return { includeSet, prismaInclude: Object.keys(includePrisma).length ? includePrisma : undefined };
+  }
+ 
+  _mapBillingResponse(b, includeSet) {
+    const base = {
+      id: b.id,
+      user_id: b.user_id,
+      auction_id: b.auction_id,
+      billing_document_type: b.billing_document_type,
+      billing_document_number: b.billing_document_number,
+      billing_name: b.billing_name,
+      monto: b.monto,
+      moneda: b.moneda,
+      concepto: b.concepto,
+      created_at: b.created_at,
+      updated_at: b.updated_at,
+      references: {
+        user_id: b.user_id,
+        auction_id: b.auction_id,
+      },
+    };
+ 
+    if (includeSet && includeSet.size > 0) {
+      const related = {};
+      if (includeSet.has('user') && b.user) {
+        related.user = {
+          id: b.user.id,
+          first_name: b.user.first_name,
+          last_name: b.user.last_name,
+          document_type: b.user.document_type,
+          document_number: b.user.document_number,
+        };
+      }
+      if (includeSet.has('auction') && b.auction) {
+        related.auction = {
+          id: b.auction.id,
+          estado: b.auction.estado,
+          fecha_resultado_general: b.auction.fecha_resultado_general,
+          placa: b.auction.asset?.placa ?? null,
+          empresa_propietaria: b.auction.asset?.empresa_propietaria ?? null,
+          marca: b.auction.asset?.marca ?? null,
+          modelo: b.auction.asset?.modelo ?? null,
+          año: b.auction.asset?.año ?? null,
+          descripcion: b.auction.asset?.descripcion ?? null,
+        };
+      }
+      if (Object.keys(related).length > 0) base.related = related;
+    }
+ 
+    return base;
+  }
+ 
+  /**
+   * Listar facturaciones (Admin)
+   * Filtros: fecha_desde, fecha_hasta, page, limit, include=user,auction
+   */
+  async listBillings(filters = {}) {
+    const {
+      page = 1,
+      limit = 20,
+      fecha_desde,
+      fecha_hasta,
+      include = '',
+    } = filters;
+ 
+    const skip = (Number(page) - 1) * Number(limit);
+ 
+    const where = {};
+    if (fecha_desde || fecha_hasta) {
+      where.created_at = {};
+      if (fecha_desde) where.created_at.gte = new Date(fecha_desde);
+      if (fecha_hasta) where.created_at.lte = new Date(fecha_hasta);
+    }
+ 
+    const { includeSet, prismaInclude } = this._buildIncludeForBilling(include);
+ 
+    const [items, total] = await Promise.all([
+      prisma.billing.findMany({
+        where,
+        include: prismaInclude,
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: Number(limit),
+      }),
+      prisma.billing.count({ where }),
+    ]);
+ 
+    const billings = items.map((b) => this._mapBillingResponse(b, includeSet));
+ 
+    return {
+      billings,
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        total_pages: Math.max(1, Math.ceil(total / Number(limit))),
+      },
+    };
+  }
+ 
+  /**
+   * Listar facturaciones por usuario (Admin: cualquiera; Client: solo propio)
+   * Filtros: fecha_desde, fecha_hasta, page, limit, include=user,auction
+   */
+  async getBillingsByUser(targetUserId, filters = {}, requesterRole = 'client', requesterId = null) {
+    if (requesterRole === 'client' && requesterId && requesterId !== targetUserId) {
+      throw new ConflictError('No tiene permisos para ver facturaciones de este usuario', 'FORBIDDEN');
+    }
+ 
+    const {
+      page = 1,
+      limit = 20,
+      fecha_desde,
+      fecha_hasta,
+      include = '',
+    } = filters;
+ 
+    const skip = (Number(page) - 1) * Number(limit);
+ 
+    const where = { user_id: targetUserId };
+    if (fecha_desde || fecha_hasta) {
+      where.created_at = {};
+      if (fecha_desde) where.created_at.gte = new Date(fecha_desde);
+      if (fecha_hasta) where.created_at.lte = new Date(fecha_hasta);
+    }
+ 
+    const { includeSet, prismaInclude } = this._buildIncludeForBilling(include);
+ 
+    const [items, total] = await Promise.all([
+      prisma.billing.findMany({
+        where,
+        include: prismaInclude,
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: Number(limit),
+      }),
+      prisma.billing.count({ where }),
+    ]);
+ 
+    const billings = items.map((b) => this._mapBillingResponse(b, includeSet));
+ 
+    return {
+      billings,
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        total_pages: Math.max(1, Math.ceil(total / Number(limit))),
+      },
+    };
+  }
+ 
+  /**
+   * Detalle de facturación (Admin: cualquiera; Client: solo propio)
+   * include CSV: user,auction
+   */
+  async getBillingById(billingId, requesterRole = 'client', requesterId = null, include = '') {
+    const { includeSet, prismaInclude } = this._buildIncludeForBilling(include);
+ 
+    const b = await prisma.billing.findUnique({
+      where: { id: billingId },
+      include: prismaInclude,
+    });
+    if (!b) throw new NotFoundError('Billing');
+ 
+    if (requesterRole === 'client' && requesterId && b.user_id !== requesterId) {
+      throw new ConflictError('No tiene permisos para ver esta facturación', 'FORBIDDEN');
+    }
+ 
+    return this._mapBillingResponse(b, includeSet);
+  }
+ 
   /**
    * Helper: Recalcula y actualiza User.saldo_retenido sumando pagos de garantía validados
    * de subastas en estados que retienen: ['finalizada', 'ganada'].
@@ -201,12 +417,12 @@ class BillingService {
         auction: { select: { id: true, estado: true } },
       },
     });
-
+ 
     const retenedorStates = new Set(['finalizada', 'ganada']);
     const auctionIdsToRetain = offers
       .filter((o) => o.auction && retenedorStates.has(o.auction.estado))
       .map((o) => o.auction.id);
-
+ 
     if (auctionIdsToRetain.length === 0) {
       await tx.user.update({
         where: { id: userId },
@@ -214,7 +430,7 @@ class BillingService {
       });
       return 0;
     }
-
+ 
     const validatedGuaranteeMovs = await tx.movement.findMany({
       where: {
         user_id: userId,
@@ -225,18 +441,18 @@ class BillingService {
       },
       select: { monto: true },
     });
-
+ 
     const saldoRetenido = Number(
       validatedGuaranteeMovs.reduce((acc, m) => acc + Number(m.monto || 0), 0).toFixed(2)
     );
-
+ 
     await tx.user.update({
       where: { id: userId },
       data: { saldo_retenido: saldoRetenido },
     });
-
+ 
     return saldoRetenido;
   }
 }
-
+ 
 module.exports = new BillingService();

@@ -161,8 +161,8 @@ async function getBalance(headers, userId) {
   };
 }
 
-async function createRefund(clientHeaders, auctionId, monto, tipo, motivo) {
-  const payload = { monto_solicitado: approx2(monto), tipo_reembolso: tipo, motivo, auction_id: auctionId };
+async function createRefund(clientHeaders, auctionId, monto, motivo) {
+  const payload = { monto_solicitado: approx2(monto), motivo, auction_id: auctionId };
   const { res, data } = await req('/refunds', { method: 'POST', headers: clientHeaders, body: payload });
   if (!res.ok) throw new Error('Crear refund falló');
   return data.data.refund.id;
@@ -260,15 +260,15 @@ async function run() {
   assertEq2('Disponible tras penalizar (70% disponible)', balAfterPenal.saldo_disponible, esperadoTotalTrasPenal);
 
   // Paso 6: Cliente solicita reembolso del 70% (840)
-  const refundId = await createRefund(clientHeaders, auctionId, garantia - penalidad, 'devolver_dinero', 'Solicitar devolución tras penalidad');
+  const refundId = await createRefund(clientHeaders, auctionId, garantia - penalidad, 'Solicitar devolución tras penalidad');
   const balAfterRefundReq = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterRefundReq);
-  // No cambios aún
+  // Nuevo: retención al solicitar (previene doble gasto)
   assertEq2('Total tras solicitar reembolso (sin cambio)', balAfterRefundReq.saldo_total, balAfterPenal.saldo_total);
-  assertEq2('Retenido tras solicitar reembolso (sin cambio)', balAfterRefundReq.saldo_retenido, balAfterPenal.saldo_retenido);
-  assertEq2('Disponible tras solicitar reembolso (sin cambio)', balAfterRefundReq.saldo_disponible, balAfterPenal.saldo_disponible);
+  assertEq2('Retenido tras solicitar reembolso (+70%)', balAfterRefundReq.saldo_retenido, approx2(balAfterPenal.saldo_retenido + (garantia - penalidad)));
+  assertEq2('Disponible tras solicitar reembolso (-70%)', balAfterRefundReq.saldo_disponible, approx2(balAfterPenal.saldo_disponible - (garantia - penalidad)));
 
-  // Paso 7: Admin confirma
+  // Paso 7: Admin confirma (mantiene retención)
   await manageRefund(adminHeaders, refundId, 'confirmado', 'Confirmado devolución 70%');
   const balAfterRefundConfirm = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterRefundConfirm);

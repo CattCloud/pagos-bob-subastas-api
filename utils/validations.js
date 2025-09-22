@@ -96,11 +96,11 @@ const auctionSchemas = {
   }),
   updateStatus: Joi.object({
     estado: baseSchemas.auctionStatus.required(),
-    motivo: Joi.string().max(200).optional(),
+    motivo: Joi.string().min(10).max(500).required(),
   }),
   extendDeadline: Joi.object({
     fecha_limite_pago: baseSchemas.futureDatetime.required(),
-    motivo: Joi.string().max(200).optional(),
+    motivo: Joi.string().min(10).max(500).required(),
   }),
   competitionResult: Joi.object({
     resultado: Joi.string().valid('ganada', 'perdida', 'penalizada').required(),
@@ -158,10 +158,9 @@ const refundSchemas = {
         return v;
       })
       .required(),
-    tipo_reembolso: Joi.string().valid('mantener_saldo', 'devolver_dinero').required(),
-    motivo: Joi.string().max(200).optional(),
-    // HU-REEM-01: auction_id es obligatorio (trazabilidad por subasta)
-    auction_id: baseSchemas.cuid.required(),
+    motivo: Joi.string().min(10).max(500).required(),
+    // auction_id ya no es obligatorio; el reembolso ahora opera sobre saldo disponible
+    auction_id: baseSchemas.cuid.optional(),
   }),
   manageRefund: Joi.object({
     estado: Joi.string().valid('confirmado', 'rechazado').required(),
@@ -171,7 +170,7 @@ const refundSchemas = {
     tipo_transferencia: Joi.string().valid('transferencia', 'deposito').optional(),
     banco_destino: Joi.string().min(3).max(50).optional(),
     numero_cuenta_destino: Joi.string().min(10).max(20).optional(),
-    numero_operacion: Joi.string().min(3).max(100).optional(),
+    numero_operacion: Joi.string().min(3).max(100).required(),
     // Permitir opcionalmente pasar auction_id para trazabilidad explícita
     auction_id: baseSchemas.cuid.optional(),
   }),
@@ -267,6 +266,8 @@ const querySchemas = {
     ).optional(),
     user_id: baseSchemas.cuid.optional(),
     auction_id: baseSchemas.cuid.optional(),
+    // Param opcional para enriquecer respuesta: include=user,auction
+    include: Joi.string().max(100).optional(),
   }).concat(pagination).concat(dateRange),
   userFilters: Joi.object({
     search: Joi.string().max(100).optional(),

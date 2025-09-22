@@ -452,7 +452,6 @@ class MovementService {
         select: {
           id: true,
           estado: true,
-          tipo_reembolso: true,
         },
       };
     }
@@ -520,7 +519,6 @@ class MovementService {
           related.refund = {
             id: m.refund_ref.id,
             estado: m.refund_ref.estado,
-            tipo_reembolso: m.refund_ref.tipo_reembolso,
           };
         }
         if (Object.keys(related).length > 0) {
@@ -598,7 +596,6 @@ class MovementService {
         select: {
           id: true,
           estado: true,
-          tipo_reembolso: true,
         },
       };
     }
@@ -657,7 +654,6 @@ class MovementService {
         related.refund = {
           id: m.refund_ref.id,
           estado: m.refund_ref.estado,
-          tipo_reembolso: m.refund_ref.tipo_reembolso,
         };
       }
       if (Object.keys(related).length > 0) {
@@ -676,12 +672,14 @@ class MovementService {
    * Recalcula y actualiza User.saldo_total = sum(entradas validadas) - sum(salidas validadas)
    */
   async _recalcularSaldoTotalTx(tx, userId) {
+    // Unificación de regla: excluir entradas 'reembolso' para no inflar saldo_total
     const entradas = await tx.movement.aggregate({
       _sum: { monto: true },
       where: {
         user_id: userId,
         estado: 'validado',
         tipo_movimiento_general: 'entrada',
+        NOT: { tipo_movimiento_especifico: 'reembolso' },
       },
     });
     const salidas = await tx.movement.aggregate({
@@ -712,7 +710,7 @@ class MovementService {
    * 'facturada' NO retiene.
    */
   async _recalcularSaldoRetenidoTx(tx, userId) {
-    // Obtener IDs de subastas del usuario en estados que retienen
+    // 1) Retención por subastas: garantías validadas - reembolsos validados (entrada o salida)
     const offers = await tx.guarantee.findMany({
       where: { user_id: userId },
       select: {
@@ -726,41 +724,49 @@ class MovementService {
       .filter((o) => o.auction && retenedorStates.has(o.auction.estado))
       .map((o) => o.auction.id);
 
-    if (auctionIdsToRetain.length === 0) {
-      await tx.user.update({
-        where: { id: userId },
-        data: { saldo_retenido: 0 },
+    let sumGarantias = 0;
+    if (auctionIdsToRetain.length > 0) {
+      const guaranteeMovs = await tx.movement.findMany({
+        where: {
+          user_id: userId,
+          estado: 'validado',
+          tipo_movimiento_general: 'entrada',
+          tipo_movimiento_especifico: 'pago_garantia',
+          auction_id_ref: { in: auctionIdsToRetain },
+        },
+        select: { monto: true },
       });
-      return 0;
+      sumGarantias = guaranteeMovs.reduce((acc, m) => acc + Number(m.monto || 0), 0);
     }
 
-    // Movements validados de pago_garantia referenciando esas subastas
-    const guaranteeMovs = await tx.movement.findMany({
+    let sumReembolsos = 0;
+    if (auctionIdsToRetain.length > 0) {
+      const refundMovs = await tx.movement.findMany({
+        where: {
+          user_id: userId,
+          estado: 'validado',
+          // considerar cualquier 'reembolso' (entrada o salida)
+          tipo_movimiento_especifico: 'reembolso',
+          auction_id_ref: { in: auctionIdsToRetain },
+        },
+        select: { monto: true },
+      });
+      sumReembolsos = refundMovs.reduce((acc, m) => acc + Number(m.monto || 0), 0);
+    }
+
+    const retenidoSubastas = Number(Math.max(0, sumGarantias - sumReembolsos).toFixed(2));
+
+    // 2) Retención por solicitudes de reembolso en curso (solicitado|confirmado)
+    const pendingRefundsAgg = await tx.refund.aggregate({
+      _sum: { monto_solicitado: true },
       where: {
         user_id: userId,
-        estado: 'validado',
-        tipo_movimiento_general: 'entrada',
-        tipo_movimiento_especifico: 'pago_garantia',
-        auction_id_ref: { in: auctionIdsToRetain },
+        estado: { in: ['solicitado', 'confirmado'] },
       },
-      select: { monto: true },
     });
+    const retenidoSolicitudes = Number(pendingRefundsAgg._sum.monto_solicitado || 0);
 
-    // Reembolsos validados (entrada: mantener_saldo o salida: devolver_dinero) referenciando esas mismas subastas
-    const refundMovs = await tx.movement.findMany({
-      where: {
-        user_id: userId,
-        estado: 'validado',
-        tipo_movimiento_especifico: 'reembolso',
-        auction_id_ref: { in: auctionIdsToRetain },
-      },
-      select: { monto: true },
-    });
-
-    const sumGarantias = guaranteeMovs.reduce((acc, m) => acc + Number(m.monto || 0), 0);
-    const sumReembolsos = refundMovs.reduce((acc, m) => acc + Number(m.monto || 0), 0);
-
-    const saldoRetenido = Number(Math.max(0, sumGarantias - sumReembolsos).toFixed(2));
+    const saldoRetenido = Number((retenidoSubastas + retenidoSolicitudes).toFixed(2));
 
     await tx.user.update({
       where: { id: userId },

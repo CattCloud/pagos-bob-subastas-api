@@ -440,12 +440,14 @@ class AuctionService {
 
       // Helpers internos
       const recalcSaldoTotalTx = async (uid) => {
+        // Excluir entradas de tipo 'reembolso' para no inflar saldo_total cuando se libera retenido
         const entradas = await tx.movement.aggregate({
           _sum: { monto: true },
           where: {
             user_id: uid,
             estado: 'validado',
             tipo_movimiento_general: 'entrada',
+            NOT: { tipo_movimiento_especifico: 'reembolso' },
           },
         });
         const salidas = await tx.movement.aggregate({
@@ -497,7 +499,7 @@ class AuctionService {
             where: {
               user_id: uid,
               estado: 'validado',
-              tipo_movimiento_general: 'salida',
+              // Considerar cualquier 'reembolso' (entrada: liberación, salida: devolución de dinero)
               tipo_movimiento_especifico: 'reembolso',
               auction_id_ref: { in: auctionIdsToRetain },
             },
@@ -570,19 +572,55 @@ class AuctionService {
           break;
         }
         case 'perdida': {
-          // RN07: Mantener retenido hasta que el reembolso sea procesado
+          // Crear reembolso automático (entrada/reembolso) por el 100% de la garantía validada
+          const agg = await tx.movement.aggregate({
+            _sum: { monto: true },
+            where: {
+              user_id: userId,
+              estado: 'validado',
+              tipo_movimiento_general: 'entrada',
+              tipo_movimiento_especifico: 'pago_garantia',
+              auction_id_ref: auctionId,
+            },
+          });
+          const garantiaTotal = Number(agg._sum.monto || 0);
+
+          if (garantiaTotal > 0) {
+            await tx.movement.create({
+              data: {
+                user_id: userId,
+                tipo_movimiento_general: 'entrada',
+                tipo_movimiento_especifico: 'reembolso',
+                monto: garantiaTotal,
+                moneda: 'USD',
+                tipo_pago: null,
+                numero_cuenta_origen: null,
+                voucher_url: null,
+                concepto: `Reembolso automático por BOB perdió - Subasta ${updatedAuction.asset?.placa ?? ''}`,
+                estado: 'validado',
+                fecha_pago: new Date(),
+                fecha_resolucion: new Date(),
+                motivo_rechazo: null,
+                numero_operacion: null,
+                auction_id_ref: auctionId,
+              },
+            });
+          }
+
+          await recalcSaldoTotalTx(userId);
+          await recalcSaldoRetenidoTx(userId);
+
           await notifySafe('competencia_perdida', {
             uid: userId,
             titulo: 'Competencia externa perdida',
-            mensaje: `BOB no ganó la competencia externa para la subasta ${updatedAuction.asset?.placa ?? ''}. El dinero de la garantía seguirá retenido hasta que se procese el reembolso.`,
+            mensaje: `BOB no ganó la competencia externa para la subasta ${updatedAuction.asset?.placa ?? ''}. Tu dinero ya fue liberado y está disponible para próximas subastas.`,
             reference_type: 'auction',
             reference_id: auctionId,
           });
-          // No recalcular retenido aquí para mantener la retención vigente hasta el reembolso
           break;
         }
         case 'penalizada': {
-          // Penalidad 30% de garantía validada asociada a esta subasta
+          // Penalidad 30% de garantía validada asociada a esta subasta + reembolso automático 70%
           const agg = await tx.movement.aggregate({
             _sum: { monto: true },
             where: {
@@ -626,7 +664,31 @@ class AuctionService {
             });
           }
 
-          // Recalcular caches
+          // Reembolso automático del 70% restante como entrada/reembolso (libera retenido)
+          const reembolso70 = Number((garantiaTotal - penalidad).toFixed(2));
+          if (reembolso70 > 0) {
+            await tx.movement.create({
+              data: {
+                user_id: userId,
+                tipo_movimiento_general: 'entrada',
+                tipo_movimiento_especifico: 'reembolso',
+                monto: reembolso70,
+                moneda: 'USD',
+                tipo_pago: null,
+                numero_cuenta_origen: null,
+                voucher_url: null,
+                concepto: `Reembolso automático 70% por penalidad - Subasta ${updatedAuction.asset?.placa ?? ''}`,
+                estado: 'validado',
+                fecha_pago: new Date(),
+                fecha_resolucion: new Date(),
+                motivo_rechazo: null,
+                numero_operacion: null,
+                auction_id_ref: auctionId,
+              },
+            });
+          }
+
+          // Recalcular caches tras penalidad + reembolso automático
           await recalcSaldoTotalTx(userId);
           await recalcSaldoRetenidoTx(userId);
           break;

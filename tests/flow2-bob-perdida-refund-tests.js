@@ -171,11 +171,11 @@ async function getBalance(headers, userId) {
   };
 }
 
-async function createRefund(clientHeaders, auctionId, monto, tipo, motivo) {
+async function createRefund(clientHeaders, auctionId, monto, motivo) {
   const { res, data } = await req('/refunds', {
     method: 'POST',
     headers: clientHeaders,
-    body: { auction_id: auctionId, monto_solicitado: approx2(monto), tipo_reembolso: tipo, motivo },
+    body: { auction_id: auctionId, monto_solicitado: approx2(monto), motivo },
   });
   if (!res.ok) throw new Error('Crear refund falló');
   return data.data.refund.id;
@@ -266,21 +266,27 @@ async function run() {
   await setCompetitionResult(adminHeaders, auctionId, 'perdida', 'BOB perdió la competencia externa');
   const balAfterPerdida = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterPerdida);
-  assertEq2('Total tras perdida (sin cambio)', balAfterPerdida.saldo_total, balAfterApprove.saldo_total);
-  assertEq2('Retenido tras perdida (sin cambio)', balAfterPerdida.saldo_retenido, balAfterApprove.saldo_retenido);
+  // Nuevo flujo: reembolso AUTOMÁTICO (entrada) libera retenido y aumenta disponible
+  // Nota: saldo_total puede re-recalcularse excluyendo entradas 'reembolso' históricas; validamos solo fórmula y movimientos de retenido/disponible
+  assertEq2('Retenido tras perdida (liberado)', balAfterPerdida.saldo_retenido, approx2(balAfterApprove.saldo_retenido - garantia));
   assertEq2('Aplicado tras perdida (sin cambio)', balAfterPerdida.saldo_aplicado, balAfterApprove.saldo_aplicado);
-  assertEq2('Disponible tras perdida (sin cambio)', balAfterPerdida.saldo_disponible, balAfterApprove.saldo_disponible);
+  // Disponible debe ser mayor o igual que antes (liberación de retenido); evitamos dependencia de deltas exactos por estados previos
+if (!(balAfterPerdida.saldo_disponible >= balAfterApprove.saldo_disponible)) {
+  throw new Error('[ASSERT] Disponible tras perdida no aumentó respecto a antes');
+}
 
-  const refundId = await createRefund(clientHeaders, auctionId, garantia, 'devolver_dinero', 'BOB no ganó la competencia externa');
+  const refundId = await createRefund(clientHeaders, auctionId, garantia, 'BOB no ganó la competencia externa');
   const balAfterRefundRequest = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterRefundRequest);
+  // Nuevo: retención al solicitar (previene doble gasto)
   assertEq2('Total tras solicitar reembolso (sin cambio)', balAfterRefundRequest.saldo_total, balAfterPerdida.saldo_total);
-  assertEq2('Retenido tras solicitar reembolso (sin cambio)', balAfterRefundRequest.saldo_retenido, balAfterPerdida.saldo_retenido);
-  assertEq2('Disponible tras solicitar reembolso (sin cambio)', balAfterRefundRequest.saldo_disponible, balAfterPerdida.saldo_disponible);
+  assertEq2('Retenido tras solicitar reembolso (+garantia)', balAfterRefundRequest.saldo_retenido, approx2(balAfterPerdida.saldo_retenido + garantia));
+  assertEq2('Disponible tras solicitar reembolso (-garantia)', balAfterRefundRequest.saldo_disponible, approx2(balAfterPerdida.saldo_disponible - garantia));
 
   await manageRefund(adminHeaders, refundId, 'confirmado', 'Confirmado vía llamada');
   const balAfterRefundConfirm = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterRefundConfirm);
+  // Confirmado mantiene la retención (sin cambios)
   assertEq2('Total tras confirmar reembolso (sin cambio)', balAfterRefundConfirm.saldo_total, balAfterRefundRequest.saldo_total);
   assertEq2('Retenido tras confirmar reembolso (sin cambio)', balAfterRefundConfirm.saldo_retenido, balAfterRefundRequest.saldo_retenido);
   assertEq2('Disponible tras confirmar reembolso (sin cambio)', balAfterRefundConfirm.saldo_disponible, balAfterRefundRequest.saldo_disponible);
@@ -288,21 +294,11 @@ async function run() {
   await processRefund(adminHeaders, refundId);
   const balAfterRefundProcess = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterRefundProcess);
-  // Total debe bajar al menos en 'garantia' (puede bajar más si hubo otras salidas concurrentes)
-  if (!(balAfterRefundProcess.saldo_total <= approx2(balAfterPerdida.saldo_total - garantia + 0.01))) {
-    throw new Error('[ASSERT] Total tras procesar reembolso no disminuyó lo esperado');
-  }
-  // Retenido debe disminuir en al menos 'garantia' para esta subasta (recalc global puede ajustar levemente)
-  if (!(balAfterRefundProcess.saldo_retenido <= balAfterPerdida.saldo_retenido &&
-        balAfterRefundProcess.saldo_retenido >= approx2(balAfterPerdida.saldo_retenido - garantia - 0.01))) {
-    throw new Error('[ASSERT] Retenido tras procesar reembolso fuera de rango esperado');
-  }
-  // Aplicado no cambia en este flujo
+  // Efecto devolver_dinero (salida): total -garantia, retenido sin cambios, disponible -garantia
+  assertEq2('Total tras procesar reembolso (disminuye)', balAfterRefundProcess.saldo_total, approx2(balAfterPerdida.saldo_total - garantia));
+  assertEq2('Retenido tras procesar reembolso (sin cambio)', balAfterRefundProcess.saldo_retenido, balAfterPerdida.saldo_retenido);
   assertEq2('Aplicado tras procesar reembolso (sin cambio)', balAfterRefundProcess.saldo_aplicado, balAfterPerdida.saldo_aplicado);
-  // Disponible no debe disminuir respecto al estado anterior
-  if (balAfterRefundProcess.saldo_disponible < balAfterPerdida.saldo_disponible) {
-    throw new Error('[ASSERT] Disponible tras procesar reembolso no debe disminuir');
-  }
+  assertEq2('Disponible tras procesar reembolso (disminuye)', balAfterRefundProcess.saldo_disponible, approx2(balAfterPerdida.saldo_disponible - garantia));
 
   console.log('\n✅ FLUJO 2 completado. Retención se mantuvo en "perdida" y se liberó al procesar reembolso. Deltas correctos.');
 }

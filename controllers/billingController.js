@@ -38,6 +38,90 @@ const createBilling = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * Listar facturaciones (Admin)
+ * GET /api/billing
+ * Query: page, limit, fecha_desde, fecha_hasta, include (CSV: user,auction)
+ */
+const listBillings = asyncHandler(async (req, res) => {
+  const filters = {
+    page: req.query.page,
+    limit: req.query.limit,
+    fecha_desde: req.query.fecha_desde,
+    fecha_hasta: req.query.fecha_hasta,
+    include: req.query.include || '',
+  };
+
+  Logger.info(`Listando billings - ${req.user.user_type}: ${req.user.email}`, { filters });
+
+  const result = await billingService.listBillings(filters);
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+/**
+ * Detalle de facturación
+ * GET /api/billing/:id
+ * Query: include (CSV: user,auction)
+ */
+const getBillingById = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { include = '' } = req.query;
+
+  Logger.info(`Detalle billing ${id} - ${req.user.user_type}: ${req.user.email}`, { include });
+
+  const billing = await billingService.getBillingById(
+    id,
+    req.user.user_type,
+    req.user.id,
+    include
+  );
+
+  res.status(200).json({
+    success: true,
+    data: { billing },
+  });
+});
+
+/**
+ * Listar facturaciones por usuario
+ * GET /api/users/:userId/billings
+ * Query: page, limit, fecha_desde, fecha_hasta, include (CSV: user,auction)
+ */
+const getBillingsByUser = asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+  const filters = {
+    page: req.query.page,
+    limit: req.query.limit,
+    fecha_desde: req.query.fecha_desde,
+    fecha_hasta: req.query.fecha_hasta,
+    include: req.query.include || '',
+  };
+
+  Logger.info(
+    `Listando billings de usuario ${userId} - ${req.user.user_type}: ${req.user.email}`,
+    { filters }
+  );
+
+  const result = await billingService.getBillingsByUser(
+    userId,
+    filters,
+    req.user.user_type,
+    req.user.id
+  );
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
 module.exports = {
   createBilling,
+  listBillings,
+  getBillingById,
+  getBillingsByUser,
 };

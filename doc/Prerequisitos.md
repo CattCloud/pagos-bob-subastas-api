@@ -220,8 +220,8 @@ Tienen roles y permisos completamente diferentes:
 3. BOB participa en competencia externa contra otras empresas
 4. Según resultado de competencia:
    - **BOB gana:** Cliente debe completar datos facturación → se aplica saldo
-   - **BOB pierde:** Se reembolsa completamente al cliente
-   - **BOB gana pero cliente no paga vehículo completo:** 30% penalidad, 70% reembolso
+   - **BOB pierde:** Se libera automáticamente el 100% al saldo disponible del cliente (Movement ENTRADA/reembolso)
+   - **BOB gana pero cliente no paga vehículo completo:** 30% penalidad (Movement SALIDA/penalidad) y 70% reembolso automático (Movement ENTRADA/reembolso)
 
 ### **REGLAS DE PAGOS DE GARANTÍA:**
 
@@ -273,10 +273,10 @@ Los estados de subasta siguen este flujo:
 
 **RN07 - Retención por Estados:**
 
-- `finalizada`: Dinero SE retiene (BOB aún no compite)
-- `perdida`: Dinero se retiene hasta que el reembolso sea procesado (proceso resuelto)
+- `finalizada`: Dinero SE retiene (BOB aún no compite) hasta registrar resultado de competencia
+- `perdida`: No retiene. Se crea reembolso automático (Movement ENTRADA/reembolso por 100%) que libera la retención y aumenta el saldo disponible
 - `ganada`: Dinero se retiene hasta que se genere la factura (proceso resuelto)
-- `penalizada` : Dinero se retiene hasta que el reembolso sea procesado y se aplique la penalid (proceso resuelto)
+- `penalizada`: No retiene. Se aplica penalidad 30% (Movement SALIDA/penalidad) y reembolso automático 70% (Movement ENTRADA/reembolso) que liberan la retención
 - `facturada`: Dinero NO se retiene (aplicado en Billing)
 
 **RN - Reasignación de Ganador:**
@@ -296,7 +296,7 @@ Cuando el ganador original no realiza el pago antes del límite:
 - Penalidad se aplica SOLO cuando cliente no completa pago después de que BOB gana
 - Penalidad = 30% del monto de garantía pagado
 - Reembolso parcial = 70% del monto de garantía pagado
-- Se crean dos transacciones: una de penalidad (salida) y una de reembolso (salida)
+- Se crean dos transacciones automáticas: una de penalidad (salida 30%) y una de reembolso (entrada 70%)
 
 ### **REGLAS DE FACTURACIÓN:**
 
@@ -325,7 +325,7 @@ Cuando el ganador original no realiza el pago antes del límite:
 **RN12 - Solicitud de Reembolso:**
 
 - Un cliente puede solicitar reembolso de saldo disponible cualquier día
-- La empresa DEBE confirmar con el cliente: mantener como saldo o devolver dinero
+- La empresa DEBE confirmar datos bancarios del cliente para devolver dinero (único tipo de reembolso)
 
 **RN13 - Procesamiento:**
 
@@ -509,7 +509,7 @@ Notas:
 - id (PK)
 - user_id (FK)*
 - monto_solicitado*
-- tipo_reembolso* (mantener_saldo/devolver_dinero)
+- motivo_rechazo? (string)
 - estado
 - auction_id //Subasta asociada
 - fecha_respuesta_empresa (cuando la solicitud pasa a confirmado o rechazada)

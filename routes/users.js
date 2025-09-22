@@ -11,6 +11,8 @@ const {
   createManualMovement,
 } = require('../controllers/balanceController');
 const { listUsers } = require('../controllers/userController');
+const { getBillingsByUser } = require('../controllers/billingController');
+const { getRefundsByUser } = require('../controllers/refundController');
 const {
   requireAuth,
   requireAdmin,
@@ -71,6 +73,47 @@ router.get('/:userId/balance', getBalance);
  * @query {number} limit - Registros por página
  */
 router.get('/:userId/movements', getUserMovements);
+
+/**
+ * @route GET /api/users/:userId/billings
+ * @desc Listar facturaciones por usuario
+ * @access Private (Client own data or Admin)
+ * @params {string} userId - ID del usuario
+ * @query {string} fecha_desde - ISO
+ * @query {string} fecha_hasta - ISO
+ * @query {number} page - Número de página
+ * @query {number} limit - Registros por página
+ * @query {string} include - CSV: user,auction
+ */
+router.get('/:userId/billings', getBillingsByUser);
+
+/**
+ * @route GET /api/users/:userId/refunds
+ * @desc Listar reembolsos por usuario
+ * @access Private (Client own data or Admin)
+ * @params {string} userId - ID del usuario
+ * @query {string} estado - Filtrar por estado
+ * @query {string} auction_id - Filtrar por subasta
+ * @query {string} fecha_desde - ISO
+ * @query {string} fecha_hasta - ISO
+ * @query {number} page - Número de página
+ * @query {number} limit - Registros por página
+ * @query {string} include - CSV: user,auction
+ */
+router.get('/:userId/refunds', getRefundsByUser);
+
+/**
+ * @route GET /api/users/:userId/billings
+ * @desc Listar facturaciones por usuario
+ * @access Private (Client own data or Admin)
+ * @params {string} userId - ID del usuario
+ * @query {string} fecha_desde - ISO
+ * @query {string} fecha_hasta - ISO
+ * @query {number} page - Número de página
+ * @query {number} limit - Registros por página
+ * @query {string} include - CSV: user,auction
+ */
+router.get('/:userId/billings', getBillingsByUser);
 
 /**
  * @route POST /api/users/:userId/movements/manual

@@ -156,7 +156,6 @@ class BalanceService {
         select: {
           id: true,
           estado: true,
-          tipo_reembolso: true,
         },
       };
     }
@@ -226,7 +225,6 @@ class BalanceService {
           related.refund = {
             id: m.refund_ref.id,
             estado: m.refund_ref.estado,
-            tipo_reembolso: m.refund_ref.tipo_reembolso,
           };
         }
         if (Object.keys(related).length > 0) {
@@ -509,7 +507,7 @@ class BalanceService {
    *   - La retención efectiva se reduce por reembolsos ya procesados (salida/reembolso validados).
    */
   async _recalcularSaldoRetenidoTx(tx, userId) {
-    // 1) Subastas del usuario con estado
+    // 1) Retención por subastas (garantías validadas - reembolsos validados)
     const guarantees = await tx.guarantee.findMany({
       where: { user_id: userId },
       select: {
@@ -522,7 +520,6 @@ class BalanceService {
       .filter((o) => o.auction && retenedorStates.has(o.auction.estado))
       .map((o) => o.auction.id);
 
-    // 2) Sumar garantías validadas ligadas a esas subastas
     let sumGarantias = 0;
     if (auctionIdsToRetain.length > 0) {
       const validatedGuaranteeMovs = await tx.movement.findMany({
@@ -538,14 +535,13 @@ class BalanceService {
       sumGarantias = validatedGuaranteeMovs.reduce((acc, m) => acc + Number(m.monto || 0), 0);
     }
 
-    // 3) Restar reembolsos ya procesados (salida/reembolso validados) SOLO de estas subastas
     let sumReembolsos = 0;
     if (auctionIdsToRetain.length > 0) {
       const refundMovs = await tx.movement.findMany({
         where: {
           user_id: userId,
           estado: 'validado',
-          tipo_movimiento_general: 'salida',
+          // Considerar cualquier 'reembolso' (entrada o salida) para liberar retenido
           tipo_movimiento_especifico: 'reembolso',
           auction_id_ref: { in: auctionIdsToRetain },
         },
@@ -554,7 +550,19 @@ class BalanceService {
       sumReembolsos = refundMovs.reduce((acc, m) => acc + Number(m.monto || 0), 0);
     }
 
-    const saldoRetenido = Number(Math.max(0, sumGarantias - sumReembolsos).toFixed(2));
+    const retenidoSubastas = Number(Math.max(0, sumGarantias - sumReembolsos).toFixed(2));
+
+    // 2) Retención por solicitudes de reembolso en curso (solicitado|confirmado)
+    const pendingRefundsAgg = await tx.refund.aggregate({
+      _sum: { monto_solicitado: true },
+      where: {
+        user_id: userId,
+        estado: { in: ['solicitado', 'confirmado'] },
+      },
+    });
+    const retenidoSolicitudes = Number(pendingRefundsAgg._sum.monto_solicitado || 0);
+
+    const saldoRetenido = Number((retenidoSubastas + retenidoSolicitudes).toFixed(2));
 
     await tx.user.update({
       where: { id: userId },

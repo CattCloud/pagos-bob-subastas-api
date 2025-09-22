@@ -94,9 +94,62 @@ const listRefunds = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * GET /refunds/:id — Detalle de refund
+ * Query: include (CSV: user,auction)
+ * Auth: Admin cualquiera; Client solo propio
+ */
+const getRefundById = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { include = '' } = req.query;
+
+  Logger.info(`Detalle refund ${id} - ${req.user.user_type}: ${req.user.email}`, { include });
+
+  const refund = await refundService.getRefundById(
+    id,
+    req.user.user_type,
+    req.user.id,
+    include
+  );
+
+  res.status(200).json({
+    success: true,
+    data: { refund },
+  });
+});
+
+/**
+ * GET /users/:userId/refunds — Listar refunds por usuario
+ * Query: estado, auction_id, fecha_desde, fecha_hasta, page, limit, include (CSV: user,auction)
+ * Auth: Admin cualquiera; Client solo propio
+ */
+const getRefundsByUser = asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+  const filters = validate(querySchemas.refundFilters, req.query);
+
+  Logger.info(
+    `Listando refunds de usuario ${userId} - ${req.user.user_type}: ${req.user.email}`,
+    { filters }
+  );
+
+  const result = await refundService.getRefundsByUser(
+    userId,
+    filters,
+    req.user.user_type,
+    req.user.id
+  );
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
 module.exports = {
   createRefund,
   manageRefund,
   processRefund,
   listRefunds,
+  getRefundById,
+  getRefundsByUser,
 };

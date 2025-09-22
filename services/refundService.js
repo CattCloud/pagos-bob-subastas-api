@@ -24,11 +24,10 @@ class RefundService {
    * - Crea refund estado 'solicitado' + notificaciones
    */
   async createRefund(userId, payload) {
-    const { monto_solicitado, tipo_reembolso, motivo, auction_id } = payload;
+    const { monto_solicitado, motivo, auction_id } = payload;
 
     Logger.info(`Cliente ${userId} solicitando reembolso`, {
       monto_solicitado,
-      tipo_reembolso,
       auction_id,
     });
 
@@ -57,73 +56,39 @@ class RefundService {
       // Esto permite solicitar reembolso incluso si el saldo_disponible es 0,
       // siempre que exista retenido pendiente asociado a la subasta.
 
-      // VN-06 (opcional por ahora): si se provee auction_id, validar pertenencia y retenido disponible
-      if (auction_id) {
-        const auction = await tx.auction.findUnique({
-          where: { id: auction_id },
-          select: {
-            id: true,
-            estado: true,
-            guarantees: { where: { user_id: userId }, select: { id: true } },
-          },
-        });
-        if (!auction || !auction.guarantees?.length) {
-          throw new ConflictError(
-            'auction_id no corresponde a una subasta del cliente',
-            'INVALID_AUCTION_FOR_REFUND'
-          );
-        }
-        if (!['perdida', 'penalizada'].includes(auction.estado)) {
-          throw new ConflictError(
-            `La subasta no está en estado válido para reembolso (actual: ${auction.estado})`,
-            'AUCTION_STATE_NOT_REFUNDABLE'
-          );
-        }
+      // Validar contra saldo_disponible actual (saldo_total - saldo_retenido - aplicado)
+      const userCache = await tx.user.findUnique({
+        where: { id: userId },
+        select: { saldo_total: true, saldo_retenido: true },
+      });
+      const appliedAgg = await tx.billing.aggregate({
+        _sum: { monto: true },
+        where: { user_id: userId },
+      });
+      const saldo_total = Number(userCache?.saldo_total || 0);
+      const saldo_retenido = Number(userCache?.saldo_retenido || 0);
+      const saldo_aplicado = Number(appliedAgg._sum.monto || 0);
+      const saldo_disponible = Number((saldo_total - saldo_retenido - saldo_aplicado).toFixed(2));
 
-        const [aggGarantias, aggReembolsos] = await Promise.all([
-          tx.movement.aggregate({
-            _sum: { monto: true },
-            where: {
-              user_id: userId,
-              estado: 'validado',
-              tipo_movimiento_general: 'entrada',
-              tipo_movimiento_especifico: 'pago_garantia',
-              auction_id_ref: auction_id ,
-            },
-          }),
-          tx.movement.aggregate({
-            _sum: { monto: true },
-            where: {
-              user_id: userId,
-              estado: 'validado',
-              tipo_movimiento_general: 'salida',
-              tipo_movimiento_especifico: 'reembolso',
-              auction_id_ref: auction_id ,
-            },
-          }),
-        ]);
-
-        const garantias = Number(aggGarantias._sum.monto || 0);
-        const reembolsos = Number(aggReembolsos._sum.monto || 0);
-        const pendiente = Number((garantias - reembolsos).toFixed(2));
-        if (pendiente <= 0 || Number(monto_solicitado) > pendiente) {
-          throw new ConflictError(
-            `Monto solicitado excede saldo retenido pendiente ($${pendiente}) en la subasta`,
-            'REFUND_AMOUNT_EXCEEDS_RETAINED'
-          );
-        }
+      if (Number(monto_solicitado) > saldo_disponible) {
+        throw new ConflictError(
+          `Monto solicitado excede el saldo disponible ($${saldo_disponible})`,
+          'REFUND_AMOUNT_EXCEEDS_AVAILABLE'
+        );
       }
 
       const refund = await tx.refund.create({
         data: {
           user_id: userId,
           monto_solicitado: Number(monto_solicitado),
-          tipo_reembolso, // mantener_saldo | devolver_dinero
           estado: 'solicitado',
           motivo: motivo || null,
           ...(auction_id ? { auction_id } : {}),
         },
       });
+
+      // Retención inmediata: al solicitar reembolso, el monto queda retenido
+      await this._recalcularSaldoRetenidoTx(tx, userId);
 
       // Notificación para admin: reembolso_solicitado
       const admin = await tx.user.findFirst({
@@ -136,7 +101,7 @@ class RefundService {
           user_id: admin.id,
           tipo: 'reembolso_solicitado',
           titulo: 'Nueva solicitud de reembolso',
-          mensaje: `Cliente solicitó reembolso de $${monto_solicitado} - Tipo: ${tipo_reembolso}`,
+          mensaje: `Cliente solicitó reembolso de $${monto_solicitado}`,
           reference_type: 'refund',
           reference_id: refund.id,
         });
@@ -186,9 +151,12 @@ class RefundService {
         data: {
           estado,
           fecha_respuesta_empresa: new Date(),
-          motivo: estado === 'rechazado' ? (motivo || 'Rechazado por políticas') : refund.motivo,
+          motivo_rechazo: estado === 'rechazado' ? (motivo || 'Rechazado por políticas') : null,
         },
       });
+
+      // Si se rechaza, liberar retención; si se confirma, mantenerla
+      await this._recalcularSaldoRetenidoTx(tx, refund.user_id);
 
       // Notificación al cliente según resultado (opcional, usamos reembolso_solicitado para no crear nuevo tipo)
       await notificationService.createAndSend({
@@ -244,132 +212,56 @@ class RefundService {
       // Nota: No verificamos saldo_disponible aquí.
       // La validación se realiza contra el saldo retenido pendiente por subasta (RN07).
 
-      let movementGeneral = 'entrada';
-      let movementConcept = `Reembolso mantenido como saldo - ${refund.motivo || ''}`.trim();
-      let movementNumeroOperacion = null;
+      // Reembolso siempre es salida de dinero hacia el cliente
+      if (!numero_operacion || typeof numero_operacion !== 'string' || numero_operacion.length < 3) {
+        throw new ConflictError('numero_operacion es obligatorio y debe ser válido', 'INVALID_OPERATION_NUMBER');
+      }
+
+      const movementGeneral = 'salida';
+      const movementConcept = `Reembolso transferido - ${refund.motivo || ''}`.trim();
       let voucherUrl = null;
 
-      if (refund.tipo_reembolso === 'devolver_dinero') {
-        // Validaciones básicas
-        if (!numero_operacion || typeof numero_operacion !== 'string' || numero_operacion.length < 3) {
-          throw new ConflictError('numero_operacion es obligatorio y debe ser válido', 'INVALID_OPERATION_NUMBER');
-        }
-        movementGeneral = 'salida';
-        movementConcept = `Reembolso transferido - ${refund.motivo || ''}`.trim();
-
-        // Subir voucher si hay
-        if (voucherFile?.buffer) {
-          try {
-            const uploadResult = await uploadToCloudinary(
-              voucherFile.buffer,
-              voucherFile.originalname || 'refund_voucher',
-              userId
-            );
-            voucherUrl = uploadResult.secure_url;
-          } catch (err) {
-            throw new ConflictError('Error al procesar el comprobante del reembolso', 'UPLOAD_ERROR');
-          }
-        }
-
-        movementNumeroOperacion = numero_operacion;
-      }
-
-      // Determinar subasta a asociar (preferir refund.auction_id, luego data.auction_id; si falta, inferir)
-      let auctionIdForRefund = refund.auction_id || data?.auction_id || null;
-      if (!auctionIdForRefund) {
-        // Candidatas: subastas del usuario en estados que requieren reembolso
-        const candidates = await tx.auction.findMany({
-          where: {
-            estado: { in: ['perdida', 'penalizada'] },
-            guarantees: { some: { user_id: userId } },
-          },
-          orderBy: { updated_at: 'desc' },
-          select: { id: true },
-        });
-
-        // Buscar la primera subasta con retenido_sin_devolver >= monto_solicitado
-        const requested = Number(refund.monto_solicitado);
-        for (const a of candidates) {
-          const [aggGarantias, aggReembolsos] = await Promise.all([
-            tx.movement.aggregate({
-              _sum: { monto: true },
-              where: {
-                user_id: userId,
-                estado: 'validado',
-                tipo_movimiento_general: 'entrada',
-                tipo_movimiento_especifico: 'pago_garantia',
-                auction_id_ref: a.id ,
-              },
-            }),
-            tx.movement.aggregate({
-              _sum: { monto: true },
-              where: {
-                user_id: userId,
-                estado: 'validado',
-                tipo_movimiento_general: 'salida',
-                tipo_movimiento_especifico: 'reembolso',
-                auction_id_ref: a.id ,
-              },
-            }),
-          ]);
-
-          const garantias = Number(aggGarantias._sum.monto || 0);
-          const reembolsos = Number(aggReembolsos._sum.monto || 0);
-          const pendiente = Number((garantias - reembolsos).toFixed(2));
-
-          if (pendiente >= requested && pendiente > 0) {
-            auctionIdForRefund = a.id;
-            break;
-          }
-        }
-
-        // Fallback: si no encuentra por monto, tomar la primera candidata (para no perder trazabilidad)
-        if (!auctionIdForRefund && candidates.length > 0) {
-          auctionIdForRefund = candidates[0].id;
-        }
-      }
-
-      // Validación específica para 'devolver_dinero': debe existir retenido pendiente suficiente en la subasta
-      if (refund.tipo_reembolso === 'devolver_dinero') {
-        if (!auctionIdForRefund) {
-          throw new ConflictError(
-            'No se pudo determinar la subasta asociada al reembolso',
-            'MISSING_AUCTION_REFERENCE_FOR_REFUND'
+      // Subir voucher si hay
+      if (voucherFile?.buffer) {
+        try {
+          const uploadResult = await uploadToCloudinary(
+            voucherFile.buffer,
+            voucherFile.originalname || 'refund_voucher',
+            userId
           );
-        }
-
-        const [aggGarantiasSel, aggReembolsosSel] = await Promise.all([
-          tx.movement.aggregate({
-            _sum: { monto: true },
-            where: {
-              user_id: userId,
-              estado: 'validado',
-              tipo_movimiento_general: 'entrada',
-              tipo_movimiento_especifico: 'pago_garantia',
-              auction_id_ref: auctionIdForRefund ,
-            },
-          }),
-          tx.movement.aggregate({
-            _sum: { monto: true },
-            where: {
-              user_id: userId,
-              estado: 'validado',
-              tipo_movimiento_general: 'salida',
-              tipo_movimiento_especifico: 'reembolso',
-              auction_id_ref: auctionIdForRefund ,
-            },
-          }),
-        ]);
-        const garantiasSel = Number(aggGarantiasSel._sum.monto || 0);
-        const reembolsosSel = Number(aggReembolsosSel._sum.monto || 0);
-        const pendienteSel = Number((garantiasSel - reembolsosSel).toFixed(2));
-        if (pendienteSel <= 0 || Number(refund.monto_solicitado) > pendienteSel) {
-          throw new ConflictError(
-            `Monto solicitado excede saldo retenido pendiente ($${pendienteSel}) en la subasta seleccionada`,
-            'REFUND_AMOUNT_EXCEEDS_RETAINED'
-          );
+          voucherUrl = uploadResult.secure_url;
+        } catch (err) {
+          throw new ConflictError('Error al procesar el comprobante del reembolso', 'UPLOAD_ERROR');
         }
       }
+
+      const movementNumeroOperacion = numero_operacion;
+
+      // Validar nuevamente con retención activa: el monto ya está retenido, por lo que
+      // se permite procesar aunque saldo_disponible sea menor al monto solicitado.
+      // Chequeo de seguridad: monto <= saldo_disponible + monto_solicitado
+      const userCache = await tx.user.findUnique({
+        where: { id: userId },
+        select: { saldo_total: true, saldo_retenido: true },
+      });
+      const appliedAgg = await tx.billing.aggregate({
+        _sum: { monto: true },
+        where: { user_id: userId },
+      });
+      const saldo_total = Number(userCache?.saldo_total || 0);
+      const saldo_retenido = Number(userCache?.saldo_retenido || 0);
+      const saldo_aplicado = Number(appliedAgg._sum.monto || 0);
+      const saldo_disponible = Number((saldo_total - saldo_retenido - saldo_aplicado).toFixed(2));
+      const safetyAvailable = Number((saldo_disponible + Number(refund.monto_solicitado)).toFixed(2));
+
+      if (Number(refund.monto_solicitado) > safetyAvailable) {
+        throw new ConflictError(
+          `Saldo reservado insuficiente para procesar el reembolso (disp+retenido_solicitud=$${safetyAvailable})`,
+          'INSUFFICIENT_RESERVED_BALANCE'
+        );
+      }
+
+      // No se requiere referencia a subasta específica; el reembolso sale del saldo disponible global
 
       // Nota: Evitamos persistir auction_id en Refund para no acoplarlo al flujo.
       // La trazabilidad y el cálculo de retenido se basan ahora en referencias directas en Movement
@@ -392,7 +284,7 @@ class RefundService {
           fecha_resolucion: new Date(),
           motivo_rechazo: null,
           numero_operacion: movementNumeroOperacion,
-          auction_id_ref: auctionIdForRefund ?? null,
+          auction_id_ref: null,
           refund_id_ref: refundId,
         },
       });
@@ -420,10 +312,7 @@ class RefundService {
         user_id: userId,
         tipo: 'reembolso_procesado',
         titulo: 'Reembolso procesado',
-        mensaje:
-          refund.tipo_reembolso === 'mantener_saldo'
-            ? `Se procesó su reembolso #${refundId} como saldo disponible.`
-            : `Se procesó su reembolso #${refundId} y el dinero fue transferido.`,
+        mensaje: `Se procesó su reembolso #${refundId} y el dinero fue transferido.`,
         reference_type: 'refund',
         reference_id: refundId,
       });
@@ -432,10 +321,101 @@ class RefundService {
     });
   }
 
+  // ---------------------------------------
+  // Listados y detalle con include opt-in
+  // include CSV: user,auction
+  // ---------------------------------------
+  _buildIncludeForRefunds(includeRaw = '') {
+    const includeSet = new Set(
+      String(includeRaw)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+  
+    const includePrisma = {};
+    if (includeSet.has('user')) {
+      includePrisma.user = {
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          document_type: true,
+          document_number: true,
+        },
+      };
+    }
+    if (includeSet.has('auction')) {
+      includePrisma.auction = {
+        select: {
+          id: true,
+          asset: {
+            select: {
+              placa: true,
+              empresa_propietaria: true,
+              marca: true,
+              modelo: true,
+              año: true,
+            },
+          },
+        },
+      };
+    }
+  
+    return { includeSet, prismaInclude: Object.keys(includePrisma).length ? includePrisma : undefined };
+  }
+  
+  _mapRefundResponse(r, includeSet) {
+    const base = {
+      id: r.id,
+      user_id: r.user_id,
+      auction_id: r.auction_id ?? null,
+      monto_solicitado: r.monto_solicitado,
+      estado: r.estado,
+      fecha_respuesta_empresa: r.fecha_respuesta_empresa ?? null,
+      fecha_procesamiento: r.fecha_procesamiento ?? null,
+      motivo: r.motivo ?? null,
+      motivo_rechazo: r.motivo_rechazo ?? null,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      references: {
+        user_id: r.user_id,
+        auction_id: r.auction_id ?? null,
+      },
+    };
+  
+    if (includeSet && includeSet.size > 0) {
+      const related = {};
+      if (includeSet.has('user') && r.user) {
+        related.user = {
+          id: r.user.id,
+          first_name: r.user.first_name,
+          last_name: r.user.last_name,
+          document_type: r.user.document_type,
+          document_number: r.user.document_number,
+        };
+      }
+      if (includeSet.has('auction') && r.auction) {
+        related.auction = {
+          id: r.auction.id,
+          placa: r.auction.asset?.placa ?? null,
+          empresa_propietaria: r.auction.asset?.empresa_propietaria ?? null,
+          marca: r.auction.asset?.marca ?? null,
+          modelo: r.auction.asset?.modelo ?? null,
+          año: r.auction.asset?.año ?? null,
+        };
+      }
+      if (Object.keys(related).length > 0) base.related = related;
+    }
+  
+    return base;
+  }
+  
   /**
    * Listar solicitudes de reembolso (Refunds) para Admin o Cliente
    * - Admin: puede ver todos y filtrar por user_id/auction_id/estado/fechas
    * - Cliente: solo ve sus propias solicitudes (se ignora user_id si lo envía)
+   * Filtros: estado, user_id (admin), auction_id, fecha_desde, fecha_hasta, page, limit, include=user,auction
    */
   async listRefunds(requestingUser, filters = {}) {
     const {
@@ -446,13 +426,14 @@ class RefundService {
       auction_id,
       fecha_desde,
       fecha_hasta,
+      include = '',
     } = filters;
-
+  
     const offset = paginationHelpers.calculateOffset(page, limit);
-
+  
     // Construir filtros
     const where = {};
-
+  
     // Visibilidad por rol
     if (requestingUser?.user_type === 'admin') {
       if (user_id) where.user_id = user_id;
@@ -460,43 +441,118 @@ class RefundService {
       // Cliente: restringir a su propio user_id
       where.user_id = requestingUser.id;
     }
-
+  
     if (estado) {
       const estados = Array.isArray(estado) ? estado : (typeof estado === 'string' ? estado.split(',').map(s => s.trim()) : []);
       if (estados.length > 0) where.estado = { in: estados };
     }
-
+  
     if (auction_id) {
       where.auction_id = auction_id;
     }
-
+  
     if (fecha_desde || fecha_hasta) {
       where.created_at = {};
       if (fecha_desde) where.created_at.gte = new Date(fecha_desde);
       if (fecha_hasta) where.created_at.lte = new Date(fecha_hasta);
     }
-
+  
+    const { includeSet, prismaInclude } = this._buildIncludeForRefunds(include);
+  
     // Ejecutar consulta con paginación
-    const [refunds, total] = await Promise.all([
+    const [items, total] = await Promise.all([
       prisma.refund.findMany({
         where,
-        include: {
-          auction: {
-            include: {
-              asset: true,
-            },
-          },
-        },
+        include: prismaInclude,
         orderBy: { created_at: 'desc' },
         skip: offset,
         take: parseInt(limit),
       }),
       prisma.refund.count({ where }),
     ]);
-
+  
+    const refunds = items.map((r) => this._mapRefundResponse(r, includeSet));
     const pagination = paginationHelpers.generatePaginationMeta(page, limit, total);
-
+  
     return { refunds, pagination };
+  }
+  
+  /**
+   * Listar reembolsos por usuario específico
+   * - Admin: cualquiera
+   * - Cliente: solo el propio
+   */
+  async getRefundsByUser(targetUserId, filters = {}, requesterRole = 'client', requesterId = null) {
+    if (requesterRole === 'client' && requesterId && requesterId !== targetUserId) {
+      throw new ConflictError('No tiene permisos para ver reembolsos de este usuario', 'FORBIDDEN');
+    }
+  
+    const {
+      page = 1,
+      limit = 20,
+      estado,
+      auction_id,
+      fecha_desde,
+      fecha_hasta,
+      include = '',
+    } = filters;
+  
+    const offset = paginationHelpers.calculateOffset(page, limit);
+  
+    const where = { user_id: targetUserId };
+  
+    if (estado) {
+      const estados = Array.isArray(estado) ? estado : (typeof estado === 'string' ? estado.split(',').map(s => s.trim()) : []);
+      if (estados.length > 0) where.estado = { in: estados };
+    }
+  
+    if (auction_id) {
+      where.auction_id = auction_id;
+    }
+  
+    if (fecha_desde || fecha_hasta) {
+      where.created_at = {};
+      if (fecha_desde) where.created_at.gte = new Date(fecha_desde);
+      if (fecha_hasta) where.created_at.lte = new Date(fecha_hasta);
+    }
+  
+    const { includeSet, prismaInclude } = this._buildIncludeForRefunds(include);
+  
+    const [items, total] = await Promise.all([
+      prisma.refund.findMany({
+        where,
+        include: prismaInclude,
+        orderBy: { created_at: 'desc' },
+        skip: offset,
+        take: parseInt(limit),
+      }),
+      prisma.refund.count({ where }),
+    ]);
+  
+    const refunds = items.map((r) => this._mapRefundResponse(r, includeSet));
+    const pagination = paginationHelpers.generatePaginationMeta(page, limit, total);
+  
+    return { refunds, pagination };
+  }
+  
+  /**
+   * Detalle de refund (Admin: cualquiera; Client: solo propio)
+   * include CSV: user,auction
+   */
+  async getRefundById(refundId, requesterRole = 'client', requesterId = null, include = '') {
+    const { includeSet, prismaInclude } = this._buildIncludeForRefunds(include);
+  
+    const r = await prisma.refund.findUnique({
+      where: { id: refundId },
+      include: prismaInclude,
+    });
+    if (!r) throw new NotFoundError('Refund');
+  
+    if (requesterRole === 'client' && requesterId && r.user_id !== requesterId) {
+      throw new ConflictError('No tiene permisos para ver este reembolso', 'FORBIDDEN');
+    }
+  
+    return this._mapRefundResponse(r, includeSet);
   }
 
   // ---------------- Helpers (cálculo de cache) ----------------
@@ -534,7 +590,7 @@ class RefundService {
   }
 
   async _recalcularSaldoRetenidoTx(tx, userId) {
-    // Subastas del usuario y estados
+    // 1) Retención por subastas (garantías validadas - reembolsos validados)
     const guarantees = await tx.guarantee.findMany({
       where: { user_id: userId },
       select: {
@@ -542,13 +598,11 @@ class RefundService {
       },
     });
 
-    // RN07: Estados que retienen. 'penalizada' NO retiene porque ya se aplicó la penalidad
     const retenedorStates = new Set(['finalizada', 'ganada', 'perdida']);
     const auctionIdsToRetain = guarantees
       .filter((o) => o.auction && retenedorStates.has(o.auction.estado))
       .map((o) => o.auction.id);
 
-    // Garantías validadas asociadas a subastas retenedoras
     let sumGarantias = 0;
     if (auctionIdsToRetain.length > 0) {
       const validatedGuaranteeMovs = await tx.movement.findMany({
@@ -564,14 +618,13 @@ class RefundService {
       sumGarantias = validatedGuaranteeMovs.reduce((acc, m) => acc + Number(m.monto || 0), 0);
     }
 
-    // Reembolsos de salida ya procesados (validados) a restar, SOLO de estas subastas
     let sumReembolsos = 0;
     if (auctionIdsToRetain.length > 0) {
       const refundMovs = await tx.movement.findMany({
         where: {
           user_id: userId,
           estado: 'validado',
-          // Considerar cualquier 'reembolso' (salida o entrada mantener_saldo) para liberar retenido
+          // Considerar cualquier 'reembolso' (entrada o salida) para liberar retenido
           tipo_movimiento_especifico: 'reembolso',
           auction_id_ref: { in: auctionIdsToRetain },
         },
@@ -580,7 +633,19 @@ class RefundService {
       sumReembolsos = refundMovs.reduce((acc, m) => acc + Number(m.monto || 0), 0);
     }
 
-    const saldoRetenido = Number(Math.max(0, sumGarantias - sumReembolsos).toFixed(2));
+    const retenidoSubastas = Number(Math.max(0, sumGarantias - sumReembolsos).toFixed(2));
+
+    // 2) Retención por solicitudes de reembolso (solicitado|confirmado)
+    const pendingRefundsAgg = await tx.refund.aggregate({
+      _sum: { monto_solicitado: true },
+      where: {
+        user_id: userId,
+        estado: { in: ['solicitado', 'confirmado'] },
+      },
+    });
+    const retenidoSolicitudes = Number(pendingRefundsAgg._sum.monto_solicitado || 0);
+
+    const saldoRetenido = Number((retenidoSubastas + retenidoSolicitudes).toFixed(2));
 
     await tx.user.update({
       where: { id: userId },

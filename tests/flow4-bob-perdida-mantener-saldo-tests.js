@@ -1,22 +1,19 @@
 /**
- * FLUJO 4: BOB Pierde la Competencia Externa - Reembolso "mantener_saldo"
+ * FLUJO 4: BOB Pierde la Competencia Externa - Reembolso Automático y Devolver Dinero
  * Requiere API corriendo en http://localhost:3000
  * Node 18+ (fetch nativo, Blob/FormData disponibles)
  *
  * Escenario (cliente limpio):
  * - Cliente "Ana" (DNI 12345678 seeded) gana con oferta 8,500 (garantía 680)
  * - Registra pago de garantía, Admin valida (finalizada)
- * - Admin registra resultado "perdida" (dinero retenido hasta reembolso)
- * - Cliente solicita reembolso TIPO "mantener_saldo" por 680, Admin confirma y procesa
+ * - Admin registra resultado "perdida" → AUTOMÁTICO: Movement ENTRADA/reembolso (libera retenido y aumenta disponible)
+ * - Luego el cliente solicita "devolver dinero" por 680; Admin confirma y procesa (salida/reembolso)
  * - Verificaciones de saldos en cada paso
  *
  * Expectativas de saldos:
  *   - Tras aprobar pago: total +680, retenido +680, disponible 0
- *   - Tras registrar "perdida": TODO sin cambios (retenido se mantiene +680)
- *   - Tras reembolso mantener_saldo procesado:
- *       total = 680 (se mantiene, no sale del sistema)
- *       retenido = 0 (liberado)
- *       disponible = 680 (liberado para uso futuro)
+ *   - Tras "perdida": total sin cambio, retenido 0, disponible +680 (liberado)
+ *   - Tras procesar "devolver_dinero": total -680, retenido 0, disponible -680
  */
 
 const API_BASE = 'http://localhost:3000';
@@ -198,11 +195,11 @@ async function getBalance(headers, userId) {
   };
 }
 
-async function createRefundMantenerSaldo(clientHeaders, auctionId, monto, motivo) {
-  // Forzamos auction_id para consistencia per-auction en RN07
-  const payload = { monto_solicitado: approx2(monto), tipo_reembolso: 'mantener_saldo', motivo, auction_id: auctionId };
+async function createRefund(clientHeaders, auctionId, monto, motivo) {
+  // auction_id opcional, solo para trazabilidad
+  const payload = { monto_solicitado: approx2(monto), motivo, auction_id: auctionId };
   const { res, data } = await req('/refunds', { method: 'POST', headers: clientHeaders, body: payload });
-  if (!res.ok) throw new Error('Crear refund (mantener_saldo) falló');
+  if (!res.ok) throw new Error('Crear refund falló');
   return data.data.refund.id;
 }
 
@@ -216,9 +213,9 @@ async function manageRefund(adminHeaders, refundId, estado = 'confirmado', motiv
 }
 
 async function processRefund(adminHeaders, refundId, numeroOperacion = null) {
-  // Para mantener_saldo usamos 'transferencia' para cumplir validación, aunque internamente se maneje como entrada
+  // Único tipo: devolver_dinero (salida) — numero_operacion obligatorio
   const form = new FormData();
-  form.append('tipo_transferencia', 'transferencia'); // validación requiere 'transferencia' o 'deposito'
+  form.append('tipo_transferencia', 'transferencia');
   form.append('numero_operacion', numeroOperacion || `OP-RF-${Math.random().toString(36).slice(2,8).toUpperCase()}`);
   const b64Png1x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==';
   form.append('voucher', new Blob([Buffer.from(b64Png1x1, 'base64')], { type: 'image/png' }), 'refund_voucher.png');
@@ -288,44 +285,44 @@ async function run() {
   assertEq2('Aplicado tras validar pago', balAfterApprove.saldo_aplicado, balAfterRegister.saldo_aplicado);
   assertEq2('Disponible tras validar pago', balAfterApprove.saldo_disponible, balAfterRegister.saldo_disponible);
 
-  // Paso 5: Admin registra "perdida" (dinero sigue retenido)
+  // Paso 5: Admin registra "perdida" → reembolso automático (entrada) libera retenido
   await setCompetitionResult(adminHeaders, auctionId, 'perdida', 'BOB perdió la competencia externa');
   const balAfterPerdida = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterPerdida);
   assertEq2('Total tras perdida (sin cambio)', balAfterPerdida.saldo_total, balAfterApprove.saldo_total);
-  assertEq2('Retenido tras perdida (sin cambio)', balAfterPerdida.saldo_retenido, balAfterApprove.saldo_retenido);
+  assertEq2('Retenido tras perdida (liberado)', balAfterPerdida.saldo_retenido, 0);
   assertEq2('Aplicado tras perdida (sin cambio)', balAfterPerdida.saldo_aplicado, balAfterApprove.saldo_aplicado);
-  assertEq2('Disponible tras perdida (sin cambio)', balAfterPerdida.saldo_disponible, balAfterApprove.saldo_disponible);
+  assertEq2('Disponible tras perdida (liberado)', balAfterPerdida.saldo_disponible, approx2(balAfterApprove.saldo_disponible + garantia));
 
-  // Paso 6: Cliente solicita reembolso mantener_saldo
-  const refundId = await createRefundMantenerSaldo(clientHeaders, auctionId, garantia, 'Prefiero mantener el dinero para próximas subastas de BOB');
+  // Paso 6: Cliente solicita reembolso (devolver dinero)
+  const refundId = await createRefund(clientHeaders, auctionId, garantia, 'Prefiero recibir mi dinero');
   const balAfterRefundReq = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterRefundReq);
-  // No cambios aún
+  // Nuevo: retención al solicitar (previene doble gasto)
   assertEq2('Total tras solicitar reembolso (sin cambio)', balAfterRefundReq.saldo_total, balAfterPerdida.saldo_total);
-  assertEq2('Retenido tras solicitar reembolso (sin cambio)', balAfterRefundReq.saldo_retenido, balAfterPerdida.saldo_retenido);
-  assertEq2('Disponible tras solicitar reembolso (sin cambio)', balAfterRefundReq.saldo_disponible, balAfterPerdida.saldo_disponible);
+  assertEq2('Retenido tras solicitar reembolso (+garantia)', balAfterRefundReq.saldo_retenido, approx2(balAfterPerdida.saldo_retenido + garantia));
+  assertEq2('Disponible tras solicitar reembolso (-garantia)', balAfterRefundReq.saldo_disponible, approx2(balAfterPerdida.saldo_disponible - garantia));
 
-  // Paso 7: Admin confirma la solicitud
-  await manageRefund(adminHeaders, refundId, 'confirmado', 'Confirmado mantener_saldo');
+  // Paso 7: Admin confirma la solicitud (mantiene retención)
+  await manageRefund(adminHeaders, refundId, 'confirmado', 'Confirmado devolver_dinero');
   const balAfterRefundConfirm = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterRefundConfirm);
   assertEq2('Total tras confirmar reembolso (sin cambio)', balAfterRefundConfirm.saldo_total, balAfterRefundReq.saldo_total);
   assertEq2('Retenido tras confirmar reembolso (sin cambio)', balAfterRefundConfirm.saldo_retenido, balAfterRefundReq.saldo_retenido);
   assertEq2('Disponible tras confirmar reembolso (sin cambio)', balAfterRefundConfirm.saldo_disponible, balAfterRefundReq.saldo_disponible);
 
-  // Paso 8: Admin procesa reembolso mantener_saldo
+  // Paso 8: Admin procesa reembolso (salida)
   await processRefund(adminHeaders, refundId);
   const balAfterRefundProcess = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterRefundProcess);
 
   // Validaciones finales:
-  assertEq2('Total tras procesar mantener_saldo (se mantiene)', balAfterRefundProcess.saldo_total, balAfterPerdida.saldo_total);
-  assertEq2('Retenido tras procesar mantener_saldo (liberado)', balAfterRefundProcess.saldo_retenido, 0);
-  assertEq2('Aplicado tras procesar mantener_saldo (sin cambio)', balAfterRefundProcess.saldo_aplicado, balAfterRefundConfirm.saldo_aplicado);
-  assertEq2('Disponible tras procesar mantener_saldo (liberado)', balAfterRefundProcess.saldo_disponible, balAfterRefundProcess.saldo_total);
+  assertEq2('Total tras procesar devolver_dinero (disminuye)', balAfterRefundProcess.saldo_total, approx2(balAfterPerdida.saldo_total - garantia));
+  assertEq2('Retenido tras procesar devolver_dinero (sin cambio)', balAfterRefundProcess.saldo_retenido, 0);
+  assertEq2('Aplicado tras procesar devolver_dinero (sin cambio)', balAfterRefundProcess.saldo_aplicado, balAfterRefundConfirm.saldo_aplicado);
+  assertEq2('Disponible tras procesar devolver_dinero (disminuye)', balAfterRefundProcess.saldo_disponible, approx2(balAfterPerdida.saldo_disponible - garantia));
 
-  console.log('\n✅ FLUJO 4 completado. Reembolso "mantener_saldo" procesado: retenido=0, disponible=saldo_total.');
+  console.log('\n✅ FLUJO 4 completado. Reembolso automático aplicado en "perdida" y devolución de dinero procesada correctamente.');
 }
 
 if (require.main === module) {

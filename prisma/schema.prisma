@@ -129,15 +129,14 @@ model Refund {
   user_id                 String
   auction_id              String?
   monto_solicitado        Decimal   @db.Decimal(10, 2)
-  tipo_reembolso          String // mantener_saldo, devolver_dinero
   estado                  String    @default("solicitado") // solicitado, confirmado, rechazado, procesado, cancelado
-  fecha_solicitud         DateTime  @default(now())
   fecha_respuesta_empresa DateTime?
   fecha_procesamiento     DateTime?
   motivo                  String?
+  motivo_rechazo          String?
   created_at              DateTime  @default(now())
   updated_at              DateTime  @updatedAt
-
+  
   // Relaciones
   user          User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
   auction       Auction?   @relation(fields: [auction_id], references: [id], onDelete: Cascade)

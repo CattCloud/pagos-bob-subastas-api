@@ -6,6 +6,7 @@ const {
   manageRefund,
   processRefund,
   listRefunds,
+  getRefundById,
 } = require('../controllers/refundController');
 
 const { requireAuth, requireClient, requireAdmin } = require('../middleware/auth');
@@ -35,12 +36,20 @@ router.use(requireAuth);
 router.get('/', listRefunds);
 
 /**
+ * @route GET /api/refunds/:id
+ * @desc Detalle de refund
+ * @access Private (Admin: cualquiera, Client: propio)
+ * @query {string} include - CSV: user,auction
+ */
+router.get('/:id', getRefundById);
+
+/**
  * @route POST /api/refunds
  * @desc Crear solicitud de reembolso
  * @access Private (Client only)
  * @body {number} monto_solicitado
- * @body {string} tipo_reembolso - 'mantener_saldo' | 'devolver_dinero'
  * @body {string} motivo - opcional
+ * @body {string} auction_id? - opcional (solo trazabilidad)
  */
 router.post('/', requireClient, createRefund);
 
@@ -56,13 +65,13 @@ router.patch('/:id/manage', requireAdmin, manageRefund);
 
 /**
  * @route PATCH /api/refunds/:id/process
- * @desc Procesar reembolso confirmado
+ * @desc Procesar reembolso confirmado (únicamente devolución de dinero)
  * @access Private (Admin only)
  * @params {string} id - ID de la solicitud
  * @body {string} tipo_transferencia? - 'transferencia' | 'deposito'
  * @body {string} banco_destino?
  * @body {string} numero_cuenta_destino?
- * @body {string} numero_operacion? (obligatorio si devolver_dinero)
+ * @body {string} numero_operacion - obligatorio
  * @body {file} voucher? - comprobante del reembolso (PDF/JPG/PNG)
  */
 router.patch('/:id/process', requireAdmin, processRefund);

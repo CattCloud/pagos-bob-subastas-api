@@ -65,7 +65,7 @@ if (voucherFile?.buffer) {
     throw new ConflictError('Error al procesar el archivo del comprobante', 'UPLOAD_ERROR');
   }
 }
-    return await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       // 1) Validar subasta
       const auction = await tx.auction.findUnique({
         where: { id: auction_id },
@@ -167,21 +167,24 @@ if (voucherFile?.buffer) {
         data: { saldo_retenido: retenidoBefore },
       });
 
-      // 11) Notificación dual (pago_registrado) - opcional ahora
-      await this._notifySafe('pago_registrado', {
-        tx,
-        user_id: userId,
-        titulo: 'Pago registrado',
-        mensaje: `Se registró tu pago de garantía para la subasta ${updatedAuction.asset?.placa ?? ''}. Pendiente de validación.`,
-        reference_type: 'movement',
-        reference_id: movement.id,
-      });
 
       return {
         movement,
         auction: updatedAuction,
       };
     });
+
+    // Notificación fuera de la transacción (evita mantener la TX abierta)
+    await this._notifySafe('pago_registrado', {
+      tx: null,
+      user_id: userId,
+      titulo: 'Pago registrado',
+      mensaje: `Se registró tu pago de garantía para la subasta ${result.auction.asset?.placa ?? ''}. Pendiente de validación.`,
+      reference_type: 'movement',
+      reference_id: result.movement.id,
+    });
+
+    return result;
   }
 
   /**
@@ -193,16 +196,14 @@ if (voucherFile?.buffer) {
    */
   async approvePaymentMovement(movementId, adminUserId, comentarios = null) {
     Logger.info(`Admin ${adminUserId} aprobando Movement ${movementId}`);
-
-    return await prisma.$transaction(async (tx) => {
+  
+    const result = await prisma.$transaction(async (tx) => {
       const movement = await tx.movement.findUnique({
         where: { id: movementId },
-        include: {
-          user: true,
-        },
+        include: { user: true },
       });
       if (!movement) throw new NotFoundError('Movement');
-
+  
       if (movement.estado !== 'pendiente') {
         throw BusinessErrors.PaymentAlreadyProcessed();
       }
@@ -210,13 +211,9 @@ if (voucherFile?.buffer) {
         movement.tipo_movimiento_general !== 'entrada' ||
         movement.tipo_movimiento_especifico !== 'pago_garantia'
       ) {
-        throw new ConflictError(
-          'Solo es posible aprobar pagos de garantía en estado pendiente',
-          'INVALID_MOVEMENT_TYPE'
-        );
+        throw new ConflictError('Solo es posible aprobar pagos de garantía en estado pendiente', 'INVALID_MOVEMENT_TYPE');
       }
-
-      // Aprobar Movement
+  
       const approved = await tx.movement.update({
         where: { id: movementId },
         data: {
@@ -225,49 +222,43 @@ if (voucherFile?.buffer) {
           concepto: comentarios ? `${movement.concepto} | ${comentarios}` : movement.concepto,
         },
       });
-
-      // Identificar auction_id desde referencia directa
+  
       const auction_id = movement.auction_id_ref;
       if (!auction_id) {
         throw new ConflictError('Movement sin referencia a subasta', 'MISSING_AUCTION_REFERENCE');
       }
-
-      // Actualizar subasta a 'finalizada'
+  
       const finalizedAuction = await tx.auction.update({
         where: { id: auction_id },
-        data: {
-          estado: 'finalizada',
-          finished_at: new Date(),
-        },
+        data: { estado: 'finalizada', finished_at: new Date() },
         include: { asset: true },
       });
-
-      // Recalcular saldo_total y retenido basado en movimientos validados (consistente con RN07)
+  
       await this._recalcularSaldoTotalTx(tx, movement.user_id);
       await this._recalcularSaldoRetenidoTx(tx, movement.user_id);
-
-      // Notificación pago_validado
-      await this._notifySafe('pago_validado', {
-        tx,
-        user_id: movement.user_id,
-        titulo: 'Pago de garantía aprobado',
-        mensaje: `Tu pago de garantía fue validado para la subasta ${finalizedAuction.asset?.placa ?? ''}.`,
-        reference_type: 'movement',
-        reference_id: movementId,
-      });
-
+  
       return {
         movement: approved,
         auction: finalizedAuction,
         user: {
+          data: movement.user,
           name: formatters.fullName(movement.user),
-          document: formatters.document(
-            movement.user.document_type,
-            movement.user.document_number
-          ),
+          document: formatters.document(movement.user.document_type, movement.user.document_number),
         },
       };
     });
+  
+    // Notificación pago_validado fuera de la transacción para evitar P2028
+    await this._notifySafe('pago_validado', {
+      tx: null,
+      user_id: result.movement.user_id,
+      titulo: 'Pago de garantía aprobado',
+      mensaje: `Tu pago de garantía fue validado para la subasta ${result.auction.asset?.placa ?? ''}.`,
+      reference_type: 'movement',
+      reference_id: result.movement.id,
+    });
+  
+    return result;
   }
 
   /**
@@ -279,20 +270,15 @@ if (voucherFile?.buffer) {
    */
   async rejectPaymentMovement(movementId, adminUserId, rejectionData) {
     const { motivos = [], otros_motivos, comentarios } = rejectionData || {};
-    Logger.warn(`Admin ${adminUserId} rechazando Movement ${movementId}`, {
-      motivos,
-      otros_motivos,
-    });
-
-    return await prisma.$transaction(async (tx) => {
+    Logger.warn(`Admin ${adminUserId} rechazando Movement ${movementId}`, { motivos, otros_motivos });
+  
+    const result = await prisma.$transaction(async (tx) => {
       const movement = await tx.movement.findUnique({
         where: { id: movementId },
-        include: {
-          user: true,
-        },
+        include: { user: true },
       });
       if (!movement) throw new NotFoundError('Movement');
-
+  
       if (movement.estado !== 'pendiente') {
         throw BusinessErrors.PaymentAlreadyProcessed();
       }
@@ -300,16 +286,12 @@ if (voucherFile?.buffer) {
         movement.tipo_movimiento_general !== 'entrada' ||
         movement.tipo_movimiento_especifico !== 'pago_garantia'
       ) {
-        throw new ConflictError(
-          'Solo es posible rechazar pagos de garantía en estado pendiente',
-          'INVALID_MOVEMENT_TYPE'
-        );
+        throw new ConflictError('Solo es posible rechazar pagos de garantía en estado pendiente', 'INVALID_MOVEMENT_TYPE');
       }
-
-      // Motivo rechazo
+  
       let motivoRechazo = Array.isArray(motivos) ? motivos.join(', ') : String(motivos || '');
       if (otros_motivos) motivoRechazo = motivoRechazo ? `${motivoRechazo}, ${otros_motivos}` : otros_motivos;
-
+  
       const rejected = await tx.movement.update({
         where: { id: movementId },
         data: {
@@ -319,43 +301,41 @@ if (voucherFile?.buffer) {
           concepto: comentarios ? `${movement.concepto} | ${comentarios}` : movement.concepto,
         },
       });
-
-      // Auction back to 'pendiente'
+  
       const auction_id = movement.auction_id_ref;
       if (!auction_id) {
         throw new ConflictError('Movement sin referencia a subasta', 'MISSING_AUCTION_REFERENCE');
       }
-
+  
       const revertedAuction = await tx.auction.update({
         where: { id: auction_id },
         data: { estado: 'pendiente' },
         include: { asset: true },
       });
-
-      // NO recalcular retenido en rechazo (RN07): mantener cache sin alterar otras retenciones
-
-      // Notificación pago_rechazado
-      await this._notifySafe('pago_rechazado', {
-        tx,
-        user_id: movement.user_id,
-        titulo: 'Pago de garantía rechazado',
-        mensaje: `Tu pago fue rechazado. Motivo: ${motivoRechazo}`,
-        reference_type: 'movement',
-        reference_id: movementId,
-      });
-
+  
       return {
         movement: rejected,
         auction: revertedAuction,
         user: {
+          data: movement.user,
           name: formatters.fullName(movement.user),
-          document: formatters.document(
-            movement.user.document_type,
-            movement.user.document_number
-          ),
+          document: formatters.document(movement.user.document_type, movement.user.document_number),
         },
+        motivoRechazo,
       };
     });
+  
+    // Notificación fuera de la transacción
+    await this._notifySafe('pago_rechazado', {
+      tx: null,
+      user_id: result.movement.user_id,
+      titulo: 'Pago de garantía rechazado',
+      mensaje: `Tu pago fue rechazado. Motivo: ${result.motivoRechazo}`,
+      reference_type: 'movement',
+      reference_id: result.movement.id,
+    });
+  
+    return result;
   }
 
   /**

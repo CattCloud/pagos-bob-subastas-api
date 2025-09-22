@@ -101,35 +101,23 @@ function uniquePlateRJT() {
 }
 
 async function createAuction(adminHeaders, asset) {
-  const now = Date.now();
-  const startISO = new Date(now + 5000).toISOString();   // inicia en ~5s
-  const endISO = new Date(now + 3600000).toISOString();  // +1h
-  const payload = {
-    fecha_inicio: startISO,
-    fecha_fin: endISO,
-    asset,
-  };
+  const payload = { asset };
   const { res, data } = await req('/auctions', { method: 'POST', headers: adminHeaders, body: payload });
   if (!res.ok) throw new Error('Crear subasta falló');
-  return { id: data.data.auction.id, startISO, endISO };
+  return { id: data.data.auction.id };
 }
 
-async function setWinner(adminHeaders, auctionId, userId, montoOferta, fechaOfertaISO) {
+async function setWinner(adminHeaders, auctionId, userId, montoOferta, fechaLimitePagoISO) {
   const payload = {
     user_id: userId,
     monto_oferta: montoOferta,
-    fecha_oferta: fechaOfertaISO,
-    fecha_limite_pago: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    fecha_limite_pago: fechaLimitePagoISO || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
   };
   const { res } = await req(`/auctions/${auctionId}/winner`, { method: 'POST', headers: adminHeaders, body: payload });
   if (!res.ok) throw new Error('Registrar ganador falló');
 }
 
-async function registerGuaranteePayment(clientHeaders, auctionId, amount, startISO, concepto) {
-  // esperar al inicio de la subasta para fecha_pago válida
-  const waitMs = new Date(startISO).getTime() - Date.now() + 1500;
-  if (waitMs > 0) await delay(waitMs);
-
+async function registerGuaranteePayment(clientHeaders, auctionId, amount, concepto) {
   const form = new FormData();
   form.append('auction_id', auctionId);
   form.append('monto', String(approx2(amount)));
@@ -140,7 +128,6 @@ async function registerGuaranteePayment(clientHeaders, auctionId, amount, startI
   form.append('moneda', 'USD');
   form.append('concepto', concepto || 'Pago garantía FLUJO9');
 
-  // PNG 1x1 válido
   const b64Png1x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==';
   const bin = Buffer.from(b64Png1x1, 'base64');
   form.append('voucher', new Blob([bin], { type: 'image/png' }), 'voucher.png');
@@ -214,7 +201,7 @@ async function run() {
 
   // Paso 1-2: Crear subasta y asignar ganadora
   const placa = uniquePlateRJT();
-  const { id: auctionId, startISO } = await createAuction(adminHeaders, {
+  const { id: auctionId } = await createAuction(adminHeaders, {
     placa,
     empresa_propietaria: 'EMPRESA RJT S.A.',
     marca: 'Ford',
@@ -225,8 +212,8 @@ async function run() {
 
   const oferta = 22000.00;
   const garantia = approx2(oferta * 0.08); // 1760
-  const fechaOfertaISO = new Date(new Date(startISO).getTime() + 5000).toISOString();
-  await setWinner(adminHeaders, auctionId, clientId, oferta, fechaOfertaISO);
+  const fechaLimitePagoISO = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  await setWinner(adminHeaders, auctionId, clientId, oferta, fechaLimitePagoISO);
 
   // Verificar saldos sin cambios
   const balAfterWinner = await getBalance(clientHeaders, clientId);
@@ -238,7 +225,7 @@ async function run() {
 
   // Paso 3: Intento 1 - monto incorrecto (1700)
   const intento1Monto = garantia;
-  const mov1 = await registerGuaranteePayment(clientHeaders, auctionId, intento1Monto, startISO, 'Garantía intento 1');
+  const mov1 = await registerGuaranteePayment(clientHeaders, auctionId, intento1Monto, 'Garantía intento 1');
   const balAfterReg1 = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterReg1);
   assertEq2('Total tras registro 1 (pendiente)', balAfterReg1.saldo_total, bal0.saldo_total);
@@ -256,7 +243,7 @@ async function run() {
   assertEq2('Disponible tras rechazo 1', balAfterRej1.saldo_disponible, bal0.saldo_disponible);
 
   // Paso 5: Intento 2 - monto correcto (1760) pero "comprobante ilegible"
-  const mov2 = await registerGuaranteePayment(clientHeaders, auctionId, garantia, startISO, 'Garantía intento 2 (voucher ilegible)');
+  const mov2 = await registerGuaranteePayment(clientHeaders, auctionId, garantia, 'Garantía intento 2 (voucher ilegible)');
   const balAfterReg2 = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterReg2);
   assertEq2('Total tras registro 2 (pendiente)', balAfterReg2.saldo_total, bal0.saldo_total);
@@ -274,7 +261,7 @@ async function run() {
   assertEq2('Disponible tras rechazo 2', balAfterRej2.saldo_disponible, bal0.saldo_disponible);
 
   // Paso 7: Intento 3 - monto correcto (1760) y legible
-  const mov3 = await registerGuaranteePayment(clientHeaders, auctionId, garantia, startISO, 'Garantía intento 3 (correcto)');
+  const mov3 = await registerGuaranteePayment(clientHeaders, auctionId, garantia, 'Garantía intento 3 (correcto)');
   const balAfterReg3 = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterReg3);
   assertEq2('Total tras registro 3 (pendiente)', balAfterReg3.saldo_total, bal0.saldo_total);

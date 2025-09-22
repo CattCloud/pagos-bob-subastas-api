@@ -100,24 +100,16 @@ function uniquePlateVEN() {
 }
 
 async function createAuction(adminHeaders, asset) {
-  const now = Date.now();
-  const startISO = new Date(now + 5000).toISOString();   // inicia en ~5s
-  const endISO = new Date(now + 3600000).toISOString();  // +1h
-  const payload = {
-    fecha_inicio: startISO,
-    fecha_fin: endISO,
-    asset,
-  };
+  const payload = { asset };
   const { res, data } = await req('/auctions', { method: 'POST', headers: adminHeaders, body: payload });
   if (!res.ok) throw new Error('Crear subasta falló');
-  return { id: data.data.auction.id, startISO, endISO };
+  return { id: data.data.auction.id };
 }
 
-async function setWinner(adminHeaders, auctionId, userId, montoOferta, fechaOfertaISO, fechaLimitePagoISO) {
+async function setWinner(adminHeaders, auctionId, userId, montoOferta, fechaLimitePagoISO) {
   const payload = {
     user_id: userId,
     monto_oferta: montoOferta,
-    fecha_oferta: fechaOfertaISO,
     fecha_limite_pago: fechaLimitePagoISO, // 24h
   };
   const { res } = await req(`/auctions/${auctionId}/winner`, { method: 'POST', headers: adminHeaders, body: payload });
@@ -174,7 +166,7 @@ async function run() {
 
   // Paso 1: Crear subasta Mazda CX-5 2022 (VEN-***)
   const placa = uniquePlateVEN();
-  const { id: auctionId, startISO } = await createAuction(adminHeaders, {
+  const { id: auctionId } = await createAuction(adminHeaders, {
     placa,
     empresa_propietaria: 'EMPRESA VEN S.A.',
     marca: 'Mazda',
@@ -182,12 +174,11 @@ async function run() {
     año: 2022,
     descripcion: 'FLUJO7 - Mazda CX-5 2022',
   });
-
+  
   // Paso 2: Registrar ganadora (Ana) con oferta 8000 y fecha límite de pago 24h
   const oferta = 8000.00;
-  const fechaOfertaISO = new Date(new Date(startISO).getTime() + 5000).toISOString();
   const fechaLimitePagoISO = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-  await setWinner(adminHeaders, auctionId, clientId, oferta, fechaOfertaISO, fechaLimitePagoISO);
+  await setWinner(adminHeaders, auctionId, clientId, oferta, fechaLimitePagoISO);
 
   // Paso 3: Cliente NO registra pago (no hacer nada). Verificar saldos siguen en 0
   const balSinPago = await getBalance(clientHeaders, clientId);

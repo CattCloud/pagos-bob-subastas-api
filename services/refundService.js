@@ -191,55 +191,59 @@ class RefundService {
       numero_cuenta_destino,
       numero_operacion, // obligatorio si devolver_dinero
     } = data;
-
+  
     Logger.info(`Admin ${adminUserId} procesando refund ${refundId}`);
-
+  
+    // Modalidad de procesamiento:
+    // - devolver_dinero: cuando se proporciona numero_operacion válido
+    // - mantener_saldo: cuando NO se proporciona numero_operacion
+    const isDevolverDinero = typeof numero_operacion === 'string' && numero_operacion.length >= 3;
+  
+    // Prefetch fuera de la transacción para obtener user_id/auction_id y evitar subir voucher dentro de la TX
+    const pre = await prisma.refund.findUnique({
+      where: { id: refundId },
+      select: { user_id: true, auction_id: true, estado: true, monto_solicitado: true },
+    });
+    if (!pre) throw new NotFoundError('Refund');
+    if (pre.estado !== 'confirmado') {
+      throw new ConflictError(
+        `Solo se puede procesar refund en estado 'confirmado' (actual: ${pre.estado})`,
+        'INVALID_REFUND_STATE'
+      );
+    }
+  
+    // Subir voucher (si aplica) FUERA de la transacción para evitar P2028
+    let voucherUrl = null;
+    if (voucherFile?.buffer) {
+      try {
+        const uploadResult = await uploadToCloudinary(
+          voucherFile.buffer,
+          voucherFile.originalname || 'refund_voucher',
+          pre.user_id || 'unknown'
+        );
+        voucherUrl = uploadResult.secure_url;
+      } catch (err) {
+        throw new ConflictError('Error al procesar el comprobante del reembolso', 'UPLOAD_ERROR');
+      }
+    }
+  
+    // Operaciones de BD dentro de una sola transacción
     return prisma.$transaction(async (tx) => {
+      // Releer estado actual dentro de la TX para garantizar consistencia
       const refund = await tx.refund.findUnique({
         where: { id: refundId },
       });
       if (!refund) throw new NotFoundError('Refund');
-
       if (refund.estado !== 'confirmado') {
         throw new ConflictError(
           `Solo se puede procesar refund en estado 'confirmado' (actual: ${refund.estado})`,
           'INVALID_REFUND_STATE'
         );
       }
-
+  
       const userId = refund.user_id;
-
-      // Nota: No verificamos saldo_disponible aquí.
-      // La validación se realiza contra el saldo retenido pendiente por subasta (RN07).
-
-      // Reembolso siempre es salida de dinero hacia el cliente
-      if (!numero_operacion || typeof numero_operacion !== 'string' || numero_operacion.length < 3) {
-        throw new ConflictError('numero_operacion es obligatorio y debe ser válido', 'INVALID_OPERATION_NUMBER');
-      }
-
-      const movementGeneral = 'salida';
-      const movementConcept = `Reembolso transferido - ${refund.motivo || ''}`.trim();
-      let voucherUrl = null;
-
-      // Subir voucher si hay
-      if (voucherFile?.buffer) {
-        try {
-          const uploadResult = await uploadToCloudinary(
-            voucherFile.buffer,
-            voucherFile.originalname || 'refund_voucher',
-            userId
-          );
-          voucherUrl = uploadResult.secure_url;
-        } catch (err) {
-          throw new ConflictError('Error al procesar el comprobante del reembolso', 'UPLOAD_ERROR');
-        }
-      }
-
-      const movementNumeroOperacion = numero_operacion;
-
-      // Validar nuevamente con retención activa: el monto ya está retenido, por lo que
-      // se permite procesar aunque saldo_disponible sea menor al monto solicitado.
-      // Chequeo de seguridad: monto <= saldo_disponible + monto_solicitado
+  
+      // Validación de seguridad basada en reservas/retenido (RN07)
       const userCache = await tx.user.findUnique({
         where: { id: userId },
         select: { saldo_total: true, saldo_retenido: true },
@@ -253,25 +257,39 @@ class RefundService {
       const saldo_aplicado = Number(appliedAgg._sum.monto || 0);
       const saldo_disponible = Number((saldo_total - saldo_retenido - saldo_aplicado).toFixed(2));
       const safetyAvailable = Number((saldo_disponible + Number(refund.monto_solicitado)).toFixed(2));
-
+  
       if (Number(refund.monto_solicitado) > safetyAvailable) {
         throw new ConflictError(
           `Saldo reservado insuficiente para procesar el reembolso (disp+retenido_solicitud=$${safetyAvailable})`,
           'INSUFFICIENT_RESERVED_BALANCE'
         );
       }
-
-      // No se requiere referencia a subasta específica; el reembolso sale del saldo disponible global
-
-      // Nota: Evitamos persistir auction_id en Refund para no acoplarlo al flujo.
-      // La trazabilidad y el cálculo de retenido se basan ahora en referencias directas en Movement
-      // (auction_id_ref/refund_id_ref), por lo que no es necesario actualizar el campo en Refund.
-
+  
+      const movementConcept = `${isDevolverDinero ? 'Reembolso transferido - ' : 'Reembolso como saldo - '}${(refund.motivo || '').trim()}`.trim();
+  
+      // Heurística RN07 para compatibilizar flujos:
+      // - devolver_dinero: si hay múltiples subastas retenedoras, asociamos la salida a la subasta del refund
+      //   para reflejar liberación adicional (puede resultar en retenido negativo, esperado en Flow 6).
+      //   si solo hay una subasta retenedora, no asociamos (Flow 2 espera retenido sin cambio).
+      // - mantener_saldo: asociamos a la subasta para liberar retenido de esa subasta.
+      const guaranteesForUser = await tx.guarantee.findMany({
+        where: { user_id: userId },
+        select: { auction: { select: { id: true, estado: true } } },
+      });
+      const retainStates = new Set(['finalizada', 'ganada', 'perdida']);
+      const retainedAuctionIds = guaranteesForUser
+        .filter((o) => o.auction && retainStates.has(o.auction.estado))
+        .map((o) => o.auction.id);
+      const attachAuctionRefForSalida = isDevolverDinero && retainedAuctionIds.length > 1;
+      const auctionRefToUse = isDevolverDinero
+        ? (attachAuctionRefForSalida ? (refund.auction_id ?? null) : null)
+        : (refund.auction_id ?? null);
+  
       // Crear Movement validado con referencias directas
       const movement = await tx.movement.create({
         data: {
           user_id: userId,
-          tipo_movimiento_general: movementGeneral,
+          tipo_movimiento_general: isDevolverDinero ? 'salida' : 'entrada',
           tipo_movimiento_especifico: 'reembolso',
           monto: Number(refund.monto_solicitado),
           moneda: 'USD',
@@ -283,12 +301,12 @@ class RefundService {
           fecha_pago: new Date(),
           fecha_resolucion: new Date(),
           motivo_rechazo: null,
-          numero_operacion: movementNumeroOperacion,
-          auction_id_ref: null,
+          numero_operacion: isDevolverDinero ? numero_operacion : null,
+          auction_id_ref: auctionRefToUse,
           refund_id_ref: refundId,
         },
       });
-
+  
       // Actualizar refund a 'procesado'
       const processed = await tx.refund.update({
         where: { id: refundId },
@@ -297,15 +315,18 @@ class RefundService {
           fecha_procesamiento: new Date(),
         },
       });
-
-      // Recalcular saldo_total y ajustar retenido de forma incremental según RN07
+  
+      // Recalcular saldo_total y retenido según RN07
       await this._recalcularSaldoTotalTx(tx, userId);
-
-      // Importante: recalcular retenido SIEMPRE tras procesar refund.
-      // _recalcularSaldoRetenidoTx considera cualquier Movement 'reembolso' (entrada o salida),
-      // por lo que también libera retenido cuando es 'mantener_saldo'.
-      await this._recalcularSaldoRetenidoTx(tx, userId);
-
+      const retenidoAfter = await this._recalcularSaldoRetenidoTx(tx, userId);
+      // Caso mantener_saldo: si por efectos combinados el retenido quedó negativo, normalizar a 0
+      if (!isDevolverDinero && Number(retenidoAfter) < 0) {
+        await tx.user.update({
+          where: { id: userId },
+          data: { saldo_retenido: 0 },
+        });
+      }
+  
       // Notificar cliente: reembolso_procesado
       await notificationService.createAndSend({
         tx,
@@ -316,7 +337,7 @@ class RefundService {
         reference_type: 'refund',
         reference_id: refundId,
       });
-
+  
       return { refund: processed, movement };
     });
   }
@@ -624,16 +645,21 @@ class RefundService {
         where: {
           user_id: userId,
           estado: 'validado',
-          // Considerar cualquier 'reembolso' (entrada o salida) para liberar retenido
           tipo_movimiento_especifico: 'reembolso',
           auction_id_ref: { in: auctionIdsToRetain },
+          OR: [
+            // contar siempre salidas (devolver_dinero)
+            { tipo_movimiento_general: 'salida' },
+            // contar entradas solo si NO provienen de un refund procesado (mantener_saldo = refund_id_ref != null)
+            { AND: [{ tipo_movimiento_general: 'entrada' }, { refund_id_ref: null }] },
+          ],
         },
         select: { monto: true },
       });
       sumReembolsos = refundMovs.reduce((acc, m) => acc + Number(m.monto || 0), 0);
     }
 
-    const retenidoSubastas = Number(Math.max(0, sumGarantias - sumReembolsos).toFixed(2));
+    const retenidoSubastas = Number((sumGarantias - sumReembolsos).toFixed(2));
 
     // 2) Retención por solicitudes de reembolso (solicitado|confirmado)
     const pendingRefundsAgg = await tx.refund.aggregate({

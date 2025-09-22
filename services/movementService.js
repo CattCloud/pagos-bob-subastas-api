@@ -49,6 +49,22 @@ class MovementService {
     });
     const retenidoBefore = Number(userBeforeCache?.saldo_retenido || 0);
 
+// Subir voucher a Cloudinary FUERA de la transacción para evitar P2028
+let voucherUrl = null;
+if (voucherFile?.buffer) {
+  try {
+    const uploadResult = await uploadToCloudinary(
+      voucherFile.buffer,
+      voucherFile.originalname || 'payment_voucher',
+      userId
+    );
+    voucherUrl = uploadResult.secure_url;
+    Logger.info(`Comprobante subido (pre-TX): ${uploadResult.public_id}`);
+  } catch (err) {
+    Logger.error('Error subiendo voucher a Cloudinary (pre-TX):', err);
+    throw new ConflictError('Error al procesar el archivo del comprobante', 'UPLOAD_ERROR');
+  }
+}
     return await prisma.$transaction(async (tx) => {
       // 1) Validar subasta
       const auction = await tx.auction.findUnique({
@@ -115,22 +131,7 @@ class MovementService {
         }
       }
 
-      // 6) Subir voucher a Cloudinary
-      let voucherUrl = null;
-      if (voucherFile?.buffer) {
-        try {
-          const uploadResult = await uploadToCloudinary(
-            voucherFile.buffer,
-            voucherFile.originalname,
-            userId
-          );
-          voucherUrl = uploadResult.secure_url;
-          Logger.info(`Comprobante subido: ${uploadResult.public_id}`);
-        } catch (err) {
-          Logger.error('Error subiendo voucher a Cloudinary:', err);
-          throw new ConflictError('Error al procesar el archivo del comprobante', 'UPLOAD_ERROR');
-        }
-      }
+      // 6) Voucher ya subido fuera de la transacción (pre-TX). Usamos voucherUrl obtenido previamente.
 
       // 7) Crear Movement pendiente con referencias directas
       const movement = await tx.movement.create({

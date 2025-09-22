@@ -124,8 +124,18 @@ const guaranteeSchemas = {
 
 // BILLING
 const billingSchemas = {
+  // Compatibilidad: creación directa (si se sigue usando en algún flujo)
   createBilling: Joi.object({
     auction_id: baseSchemas.cuid.required(),
+    billing_document_type: Joi.string().valid('RUC', 'DNI').required(),
+    billing_document_number: Joi.alternatives().conditional('billing_document_type', [
+      { is: 'RUC', then: baseSchemas.rucNumber.required() },
+      { is: 'DNI', then: baseSchemas.dniNumber.required() },
+    ]),
+    billing_name: Joi.string().min(3).max(200).required(),
+  }),
+  // Nuevo flujo HU-BILL-01: completar datos de facturación sobre un Billing existente
+  completeBilling: Joi.object({
     billing_document_type: Joi.string().valid('RUC', 'DNI').required(),
     billing_document_number: Joi.alternatives().conditional('billing_document_type', [
       { is: 'RUC', then: baseSchemas.rucNumber.required() },
@@ -170,7 +180,8 @@ const refundSchemas = {
     tipo_transferencia: Joi.string().valid('transferencia', 'deposito').optional(),
     banco_destino: Joi.string().min(3).max(50).optional(),
     numero_cuenta_destino: Joi.string().min(10).max(20).optional(),
-    numero_operacion: Joi.string().min(3).max(100).required(),
+    // numero_operacion es obligatorio solo para devolver_dinero; si no se envía, se asume mantener_saldo
+    numero_operacion: Joi.string().min(3).max(100).optional(),
     // Permitir opcionalmente pasar auction_id para trazabilidad explícita
     auction_id: baseSchemas.cuid.optional(),
   }),
@@ -225,6 +236,9 @@ const querySchemas = {
       Joi.string().custom((value) => value.split(',').map(s => s.trim()))
     ).optional(),
     search: Joi.string().max(100).optional(),
+    // Param opcional para enriquecer respuesta de subastas:
+    // include=validated_payments  -> movements pago_garantia validados de la subasta
+    include: Joi.string().max(100).optional(),
   }).concat(pagination).concat(dateRange),
   movementFilters: Joi.object({
     tipo: Joi.alternatives().try(

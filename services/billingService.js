@@ -10,22 +10,15 @@ const notificationService = require('./notificationService');
 
 /**
  * Servicio de Billing (facturación)
- * HU-BILL-01 — Completar Datos de Facturación (Cliente)
- * - Crea registro Billing para subasta 'ganada'
- * - Actualiza auction.estado = 'facturada'
- * - Recalcula cache de saldo_retenido inmediatamente
- * - Notifica a cliente (facturacion_completada) y a admin (billing_generado)
+ * - Flujo legacy: createBilling (mantiene compatibilidad si se usa)
+ * - Flujo nuevo:
+ *    - HU-COMP-02: Billing parcial creado automáticamente (auctionService)
+ *    - HU-BILL-01: completeBilling → completa datos, marca subasta como 'facturada' y notifica
  */
 class BillingService {
 
   /**
-   * Crear Billing para una subasta ganada por el cliente autenticado
-   * payload = {
-   *   auction_id,
-   *   billing_document_type, // RUC | DNI
-   *   billing_document_number,
-   *   billing_name
-   * }
+   * Crear Billing (flujo legacy). Mantener para compatibilidad si alguna UI lo usa.
    */
   async createBilling(userId, payload) {
     const {
@@ -112,7 +105,7 @@ class BillingService {
       const concepto =
         `Compra vehículo ${auction.asset?.marca ?? ''} ${auction.asset?.modelo ?? ''} ${auction.asset?.año ?? ''} - Subasta #${auction.id}`;
 
-      // 2) Crear Billing
+      // 2) Crear Billing (completo)
       const billing = await tx.billing.create({
         data: {
           user_id: userId,
@@ -184,6 +177,121 @@ class BillingService {
       return {
         billing,
         auction: updatedAuction,
+      };
+    });
+  }
+
+  /**
+   * HU-BILL-01 — Completar Datos de Facturación sobre un Billing existente (cliente o admin)
+   * - Actualiza billing_document_type, billing_document_number, billing_name
+   * - Marca la subasta como 'facturada'
+   * - No recalcula saldo_retenido (ya fue liberado en HU-COMP-02)
+   * - Notifica a cliente (facturacion_completada) y admin (billing_generado)
+   */
+  async completeBilling(billingId, requesterRole = 'client', requesterId = null, payload) {
+    const {
+      billing_document_type,
+      billing_document_number,
+      billing_name,
+    } = payload;
+
+    return prisma.$transaction(async (tx) => {
+      // Cargar billing + usuario + subasta
+      const billing = await tx.billing.findUnique({
+        where: { id: billingId },
+        include: {
+          auction: { include: { asset: true } },
+        },
+      });
+      if (!billing) {
+        throw new NotFoundError('Billing');
+      }
+
+      // Seguridad: Cliente solo su propio billing. Admin cualquiera.
+      if (requesterRole === 'client' && requesterId && billing.user_id !== requesterId) {
+        throw new ConflictError('No tiene permisos para modificar esta facturación', 'FORBIDDEN');
+      }
+
+      // VN-07: Verificar que el Billing tiene datos pendientes
+      if (billing.billing_document_type && billing.billing_document_number && billing.billing_name) {
+        throw new ConflictError('Este Billing ya está completado', 'BILLING_ALREADY_COMPLETED');
+      }
+
+      // VN-06: No permitir duplicar billing_document_number para el mismo usuario
+      if (billing_document_number) {
+        const dupDoc = await tx.billing.findFirst({
+          where: {
+            user_id: billing.user_id,
+            billing_document_number,
+            // Evitar choque con sí mismo si fuese un retry
+            NOT: { id: billing.id },
+          },
+        });
+        if (dupDoc) {
+          throw new ConflictError(
+            'El número de documento de facturación ya fue usado por este usuario',
+            'DUPLICATE_BILLING_DOCUMENT'
+          );
+        }
+      }
+
+      // Actualizar datos de facturación
+      const updatedBilling = await tx.billing.update({
+        where: { id: billing.id },
+        data: {
+          billing_document_type,
+          billing_document_number,
+          billing_name,
+        },
+      });
+
+      // Marcar subasta como 'facturada' (si todavía no lo está)
+      if (billing.auction_id) {
+        const auction = await tx.auction.findUnique({ where: { id: billing.auction_id }, select: { estado: true } });
+        if (auction && auction.estado !== 'facturada') {
+          await tx.auction.update({
+            where: { id: billing.auction_id },
+            data: { estado: 'facturada' },
+          });
+        }
+      }
+
+      // Notificaciones
+      // Cliente: facturacion_completada
+      await notificationService.createAndSend({
+        tx,
+        user_id: billing.user_id,
+        tipo: 'facturacion_completada',
+        titulo: 'Facturación completada',
+        mensaje: `Sus datos de facturación han sido registrados exitosamente para la subasta ${billing.auction?.asset?.placa ?? ''}.`,
+        reference_type: 'billing',
+        reference_id: billing.id,
+      });
+
+      // Admin: billing_generado
+      const admin = await tx.user.findFirst({
+        where: { user_type: 'admin' },
+        select: { id: true },
+      });
+      if (admin) {
+        const user = await tx.user.findUnique({
+          where: { id: billing.user_id },
+          select: { first_name: true, last_name: true },
+        });
+        const cliente = user ? formatters.fullName(user) : billing.user_id;
+        await notificationService.createAndSend({
+          tx,
+          user_id: admin.id,
+          tipo: 'billing_generado',
+          titulo: 'Billing generado',
+          mensaje: `Se completó la facturación para ${cliente} - Subasta ${billing.auction?.asset?.placa ?? ''}. Monto aplicado: $${billing.monto}`,
+          reference_type: 'billing',
+          reference_id: billing.id,
+        });
+      }
+
+      return {
+        billing: updatedBilling,
       };
     });
   }
@@ -407,8 +515,7 @@ class BillingService {
   /**
    * Helper: Recalcula y actualiza User.saldo_retenido sumando pagos de garantía validados
    * de subastas en estados que retienen: ['finalizada', 'ganada'].
-   * Nota: En el contexto de billing, 'facturada'/'perdida'/'penalizada' no se consideran
-   * porque este método se usa específicamente cuando se factura una subasta ganada.
+   * Nota: Método legado, no usado en completeBilling.
    */
   async _recalcularSaldoRetenidoTx(tx, userId) {
     const offers = await tx.guarantee.findMany({

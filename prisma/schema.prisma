@@ -59,7 +59,7 @@ model Auction {
   asset_id                String
   fecha_resultado_general DateTime?
   estado                  AuctionEstado @default(activa)
-  id_offerWin             String? // ID de la oferta ganadora
+  id_offerWin             String? // ID de la garantia
   finished_at             DateTime?
   created_at              DateTime      @default(now())
   updated_at              DateTime      @updatedAt
@@ -148,9 +148,9 @@ model Refund {
 model Billing {
   id                      String              @id @default(cuid())
   user_id                 String
-  billing_document_type   BillingDocumentType
-  billing_document_number String
-  billing_name            String
+  billing_document_type   BillingDocumentType?
+  billing_document_number String?
+  billing_name            String?
   monto                   Decimal             @db.Decimal(10, 2)
   moneda                  String              @default("USD")
   concepto                String // Ej: "Compra vehículo ... - Subasta #15"

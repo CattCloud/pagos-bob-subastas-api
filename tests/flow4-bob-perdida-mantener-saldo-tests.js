@@ -108,15 +108,9 @@ async function loginClient(docType = 'DNI', docNumber = '12345678') {
 }
 
 async function createAuction(adminHeaders) {
-  const now = Date.now();
-  const startISO = new Date(now + 5000).toISOString();   // empieza en 5s
-  const endISO = new Date(now + 3600000).toISOString();  // +1h
-
   // Escenario indica Nissan Versa 2021; usamos placa base DEF-*** con sufijo único para evitar colisiones
   const placa = uniqueDefPlate();
   const payload = {
-    fecha_inicio: startISO,
-    fecha_fin: endISO,
     asset: {
       placa,
       empresa_propietaria: 'EMPRESA PERDIDA S.A.',
@@ -128,24 +122,20 @@ async function createAuction(adminHeaders) {
   };
   const { res, data } = await req('/auctions', { method: 'POST', headers: adminHeaders, body: payload });
   if (!res.ok) throw new Error('Crear subasta falló');
-  return { id: data.data.auction.id, startISO, endISO, placa };
+  return { id: data.data.auction.id, placa };
 }
 
-async function setWinner(adminHeaders, auctionId, userId, montoOferta, fechaOfertaISO) {
+async function setWinner(adminHeaders, auctionId, userId, montoOferta) {
   const payload = {
     user_id: userId,
     monto_oferta: montoOferta,
-    fecha_oferta: fechaOfertaISO,
     fecha_limite_pago: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
   };
   const { res } = await req(`/auctions/${auctionId}/winner`, { method: 'POST', headers: adminHeaders, body: payload });
   if (!res.ok) throw new Error('Registrar ganador falló');
 }
 
-async function registerGuaranteePayment(clientHeaders, auctionId, guaranteeAmount, startISO) {
-  const waitMs = new Date(startISO).getTime() - Date.now() + 1500;
-  if (waitMs > 0) await delay(waitMs);
-
+async function registerGuaranteePayment(clientHeaders, auctionId, guaranteeAmount) {
   const form = new FormData();
   form.append('auction_id', auctionId);
   form.append('monto', String(guaranteeAmount));
@@ -246,8 +236,8 @@ async function run() {
   // Estado limpio esperado 0s, pero validamos fórmula solamente
   console.log('Estado Inicial Cliente:', bal0);
 
-  // Paso 1: Crear subasta (Nissan Versa 2021 - DEF-789)
-  const { id: auctionId, startISO } = await createAuction(adminHeaders);
+  // Paso 1: Crear subasta (Nissan Versa 2021 - DEF-***)
+  const { id: auctionId } = await createAuction(adminHeaders);
   const balAfterCreate = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterCreate);
   assertEq2('Total tras crear subasta (sin cambios)', balAfterCreate.saldo_total, bal0.saldo_total);
@@ -258,8 +248,7 @@ async function run() {
   // Paso 2: Registrar ganador (oferta 8,500 => garantía 680)
   const oferta = 8500.00;
   const garantia = approx2(oferta * 0.08); // 680.00
-  const fechaOfertaISO = new Date(new Date(startISO).getTime() + 5000).toISOString();
-  await setWinner(adminHeaders, auctionId, clientId, oferta, fechaOfertaISO);
+  await setWinner(adminHeaders, auctionId, clientId, oferta);
   const balAfterWinner = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterWinner);
   assertEq2('Total tras winner (sin cambios)', balAfterWinner.saldo_total, bal0.saldo_total);
@@ -268,7 +257,7 @@ async function run() {
   assertEq2('Disponible tras winner (sin cambios)', balAfterWinner.saldo_disponible, bal0.saldo_disponible);
 
   // Paso 3: Cliente registra pago de garantía (pendiente)
-  const movementId = await registerGuaranteePayment(clientHeaders, auctionId, garantia, startISO);
+  const movementId = await registerGuaranteePayment(clientHeaders, auctionId, garantia);
   const balAfterRegister = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterRegister);
   assertEq2('Total tras registrar pago (pendiente)', balAfterRegister.saldo_total, bal0.saldo_total);
@@ -320,7 +309,8 @@ async function run() {
   assertEq2('Total tras procesar devolver_dinero (disminuye)', balAfterRefundProcess.saldo_total, approx2(balAfterPerdida.saldo_total - garantia));
   assertEq2('Retenido tras procesar devolver_dinero (sin cambio)', balAfterRefundProcess.saldo_retenido, 0);
   assertEq2('Aplicado tras procesar devolver_dinero (sin cambio)', balAfterRefundProcess.saldo_aplicado, balAfterRefundConfirm.saldo_aplicado);
-  assertEq2('Disponible tras procesar devolver_dinero (disminuye)', balAfterRefundProcess.saldo_disponible, approx2(balAfterPerdida.saldo_disponible - garantia));
+  // Disponible no cambia respecto del estado tras la solicitud/confirmación (regla: salida/reembolso no altera disponible)
+  assertEq2('Disponible tras procesar devolver_dinero (sin cambio)', balAfterRefundProcess.saldo_disponible, balAfterRefundReq.saldo_disponible);
 
   console.log('\n✅ FLUJO 4 completado. Reembolso automático aplicado en "perdida" y devolución de dinero procesada correctamente.');
 }

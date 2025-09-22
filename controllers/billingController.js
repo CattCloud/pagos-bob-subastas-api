@@ -87,6 +87,44 @@ const getBillingById = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Completar datos de facturación (HU-BILL-01)
+ * PATCH /api/billing/:id/complete
+ */
+const completeBilling = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const payload = validate(billingSchemas.completeBilling, req.body);
+
+  Logger.info(`Completar datos de facturación billing ${id} - ${req.user.user_type}: ${req.user.email}`, {
+    payload: {
+      billing_document_type: payload.billing_document_type,
+      billing_document_number: payload.billing_document_number?.slice(0, 3) + '***',
+      billing_name_len: payload.billing_name?.length,
+    },
+  });
+
+  const result = await billingService.completeBilling(
+    id,
+    req.user.user_type,
+    req.user.id,
+    payload
+  );
+
+  res.status(200).json({
+    success: true,
+    data: {
+      billing: {
+        id: result.billing.id,
+        billing_document_type: result.billing.billing_document_type,
+        billing_document_number: result.billing.billing_document_number,
+        billing_name: result.billing.billing_name,
+        updated_at: result.billing.updated_at,
+      },
+    },
+    message: 'Datos de facturación completados exitosamente',
+  });
+});
+
+/**
  * Listar facturaciones por usuario
  * GET /api/users/:userId/billings
  * Query: page, limit, fecha_desde, fecha_hasta, include (CSV: user,auction)
@@ -124,4 +162,5 @@ module.exports = {
   listBillings,
   getBillingById,
   getBillingsByUser,
+  completeBilling,
 };

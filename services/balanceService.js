@@ -180,6 +180,7 @@ class BalanceService {
         monto: m.monto,
         moneda: m.moneda,
         estado: m.estado,
+        concepto: m.concepto,
         numero_operacion: m.numero_operacion,
         fecha_pago: m.fecha_pago,
         fecha_resolucion: m.fecha_resolucion,
@@ -250,8 +251,8 @@ class BalanceService {
 
     Logger.info('Consultando resumen de saldos para admin', { filters });
 
-    const where = {};
-
+    const where = { user_type: 'client' };
+    
     if (search) {
       where.OR = [
         { first_name: { contains: search, mode: 'insensitive' } },
@@ -301,7 +302,7 @@ class BalanceService {
         user: {
           id: u.id,
           name: formatters.fullName(u),
-          document: formatters.document(u.document_type, u.document_number),
+          document: (u.document_type && u.document_number) ? `${u.document_type}: ${u.document_number}` : (u.document_number ?? ''),
           email: u.email,
           phone: u.phone_number,
         },
@@ -327,6 +328,7 @@ class BalanceService {
 
     const [userAgg, billingAgg, usersWithBalanceCount, movementsThisMonth] = await Promise.all([
       prisma.user.aggregate({
+        where: { user_type: 'client' },
         _sum: {
           saldo_total: true,
           saldo_retenido: true,
@@ -334,10 +336,11 @@ class BalanceService {
         _count: { id: true },
       }),
       prisma.billing.aggregate({
+        where: { user: { user_type: 'client' } },
         _sum: { monto: true },
       }),
       prisma.user.count({
-        where: { saldo_total: { gt: 0 } },
+        where: { user_type: 'client', saldo_total: { gt: 0 } },
       }),
       (async () => {
         const currentMonth = new Date();

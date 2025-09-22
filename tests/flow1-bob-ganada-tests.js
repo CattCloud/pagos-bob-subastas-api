@@ -3,21 +3,24 @@
  * Requiere API corriendo en http://localhost:3000
  * Node 18+ (fetch nativo, Blob/FormData disponibles)
  *
- * Escenario descrito:
+ * Escenario descrito (actualizado):
  * - Cliente "María" gana con oferta 1250 (garantía 100)
  * - Registra pago de garantía, Admin valida, subasta finaliza
- * - Admin registra resultado "ganada"
- * - Cliente completa datos de facturación (billing 100)
+ * - Admin registra resultado "ganada" → Backend crea Billing parcial automáticamente y LIBERA retenido
+ *   (efectos en saldos al marcar "ganada": retenido -= 100, aplicado += 100, total igual, disponible igual)
+ * - Cliente completa datos de facturación (PATCH /billing/:id/complete) → Saldos NO cambian
  * - Verificaciones de saldos en cada paso (en términos de deltas)
  *
  * Nota importante:
  * En el ambiente actual puede que el cliente de prueba ya tenga saldos previos.
  * Para cumplir el caso funcional sin depender de un seed vacío:
- *   - Se verifica que los DELTAS de saldo coincidan con el flujo:
+ *   - Se verifica que los DELTAS de saldo coincidan con el flujo esperado:
  *     Paso 4 (validación pago):
- *       total += 100, retenido += 100, aplicado igual, disponible sin cambio
- *     Paso 6 (billing):
- *       total igual, retenido -= 100, aplicado += 100, disponible sin cambio
+ *       retenido aumenta hasta +garantía (por RN07), aplicado igual; fórmula consistente
+ *     Paso 5 (ganada):
+ *       total igual, retenido -= garantía, aplicado += garantía, disponible sin cambio
+ *     Paso 6 (completar facturación):
+ *       sin cambios en saldos
  */
 
 const API_BASE = 'http://localhost:3000';
@@ -147,15 +150,36 @@ async function setCompetitionResult(adminHeaders, auctionId, resultado, observac
   if (!res.ok) throw new Error('Registrar resultado competencia falló');
 }
 
-async function createBilling(clientHeaders, auctionId, docNumber, billingName = 'María Cliente') {
+async function listBillingsByUser(clientHeaders, userId, include = 'auction') {
+  const { res, data } = await req(`/users/${userId}/billings?include=${include}`, {
+    method: 'GET',
+    headers: clientHeaders,
+  });
+  if (!res.ok || !data?.success) throw new Error('Listar billings por usuario falló');
+  return data.data.billings || [];
+}
+
+async function findBillingIdForAuction(clientHeaders, userId, auctionId) {
+  const billings = await listBillingsByUser(clientHeaders, userId, 'auction');
+  const found = billings.find(b => (b.auction_id === auctionId) || (b.related?.auction?.id === auctionId));
+  if (!found) {
+    throw new Error(`No se encontró Billing para la subasta ${auctionId} del usuario ${userId}`);
+  }
+  return found.id;
+}
+
+async function completeBilling(clientHeaders, billingId, docNumber, billingName = 'María Cliente') {
   const payload = {
-    auction_id: auctionId,
     billing_document_type: 'DNI',
     billing_document_number: docNumber,
     billing_name: billingName,
   };
-  const { res } = await req('/billing', { method: 'POST', headers: clientHeaders, body: payload });
-  if (!res.ok) throw new Error('Crear Billing falló');
+  const { res } = await req(`/billing/${billingId}/complete`, {
+    method: 'PATCH',
+    headers: { ...clientHeaders, 'Content-Type': 'application/json' },
+    body: payload,
+  });
+  if (!res.ok) throw new Error('Completar datos de Billing falló');
 }
 
 async function getBalance(headers, userId) {
@@ -243,25 +267,31 @@ async function run() {
   // La consistencia ya se verifica con assertFormula y deltas invariantes.
 
   // Paso 5: Admin registra que BOB ganó la competencia externa (estado 'ganada')
+  // Efecto esperado inmediato (nuevo flujo):
+  // - Se crea Billing parcial automáticamente (monto = garantía)
+  // - Se libera retenido: retenido -= garantía
+  // - saldo_aplicado += garantía (porque Billing suma a aplicado)
   await setCompetitionResult(adminHeaders, auctionId, 'ganada', 'BOB ganó la competencia externa');
   const balAfterGanada = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterGanada);
-  // Saldos sin cambios (sigue retenido a la espera de facturación)
-  assertEq2('Total tras ganada (sin cambio)', balAfterGanada.saldo_total, balAfterApprove.saldo_total);
-  assertEq2('Retenido tras ganada (sin cambio)', balAfterGanada.saldo_retenido, balAfterApprove.saldo_retenido);
-  assertEq2('Aplicado tras ganada (sin cambio)', balAfterGanada.saldo_aplicado, balAfterApprove.saldo_aplicado);
+
+  assertEq2('Total tras ganada (igual)', balAfterGanada.saldo_total, balAfterApprove.saldo_total);
+  assertEq2('Retenido tras ganada (-garantía)', balAfterGanada.saldo_retenido, balAfterApprove.saldo_retenido - garantia);
+  assertEq2('Aplicado tras ganada (+garantía)', balAfterGanada.saldo_aplicado, balAfterApprove.saldo_aplicado + garantia);
   assertEq2('Disponible tras ganada (sin cambio)', balAfterGanada.saldo_disponible, balAfterApprove.saldo_disponible);
 
-  // Paso 6: Cliente completa datos de facturación (crea Billing = garantia, subasta 'facturada')
+  // Paso 6: Cliente completa datos de facturación (PATCH /billing/:id/complete) - SIN CAMBIOS EN SALDOS
   const uniqueDoc = String(10000000 + Math.floor(Math.random() * 90000000));
-  await createBilling(clientHeaders, auctionId, uniqueDoc, 'María Cliente');
+  const billingId = await findBillingIdForAuction(clientHeaders, clientId, auctionId);
+  await completeBilling(clientHeaders, billingId, uniqueDoc, 'María Cliente');
+
   const balAfterBilling = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterBilling);
-  // Efecto esperado: retenido -garantia, aplicado +garantia, total igual, disponible sin cambio
-  assertEq2('Total tras billing (igual)', balAfterBilling.saldo_total, balAfterGanada.saldo_total);
-  assertEq2('Retenido tras billing (-garantia)', balAfterBilling.saldo_retenido, balAfterGanada.saldo_retenido - garantia);
-  assertEq2('Aplicado tras billing (+garantia)', balAfterBilling.saldo_aplicado, balAfterGanada.saldo_aplicado + garantia);
-  assertEq2('Disponible tras billing (sin cambio)', balAfterBilling.saldo_disponible, balAfterGanada.saldo_disponible);
+  // Efecto esperado: SIN CAMBIO respecto a 'ganada'
+  assertEq2('Total tras completar billing (igual)', balAfterBilling.saldo_total, balAfterGanada.saldo_total);
+  assertEq2('Retenido tras completar billing (igual)', balAfterBilling.saldo_retenido, balAfterGanada.saldo_retenido);
+  assertEq2('Aplicado tras completar billing (igual)', balAfterBilling.saldo_aplicado, balAfterGanada.saldo_aplicado);
+  assertEq2('Disponible tras completar billing (igual)', balAfterBilling.saldo_disponible, balAfterGanada.saldo_disponible);
 
   console.log('\n✅ FLUJO 1 completado correctamente. Deltas de saldo coinciden con el caso esperado.');
 }

@@ -58,11 +58,12 @@ const getAuctions = asyncHandler(async (req, res) => {
  */
 const getAuctionById = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const { include = '' } = req.query;
   
-  Logger.info(`Consultando detalle de subasta ${id} por ${req.user.user_type}`);
+  Logger.info(`Consultando detalle de subasta ${id} por ${req.user.user_type}`, { include });
   
   // Obtener subasta usando el servicio
-  const auction = await auctionService.getAuctionById(id);
+  const auction = await auctionService.getAuctionById(id, include);
   
   res.status(200).json({
     success: true,

@@ -4,11 +4,12 @@ const {
   NotFoundError, 
   ConflictError 
 } = require('../middleware/errorHandler');
-const { 
+const {
   businessValidations,
   stateHelpers,
   formatters,
   paginationHelpers,
+  businessCalculations,
 } = require('../utils');
 const { Logger } = require('../middleware/logger');
 
@@ -88,13 +89,14 @@ class AuctionService {
    * Listar subastas con filtros y paginación
    */
   async getAuctions(filters = {}) {
-    const { 
-      estado, 
-      search, 
-      fecha_desde, 
-      fecha_hasta, 
-      page = 1, 
-      limit = 20 
+    const {
+      estado,
+      search,
+      fecha_desde,
+      fecha_hasta,
+      page = 1,
+      limit = 20,
+      include = '',
     } = filters;
     
     const offset = paginationHelpers.calculateOffset(page, limit);
@@ -126,36 +128,69 @@ class AuctionService {
         ],
       };
     }
+  
+    // include (opt-in): validated_payments
+    const includeSet = new Set(
+      String(include)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+  
+    const prismaInclude = {
+      asset: {
+        select: {
+          placa: true,
+          marca: true,
+          modelo: true,
+          año: true,
+          empresa_propietaria: true,
+        },
+      },
+      guarantees: {
+        where: { estado: 'activa' },
+        include: {
+          user: {
+            select: {
+              first_name: true,
+              last_name: true,
+              document_type: true,
+              document_number: true,
+            },
+          },
+        },
+        take: 1,
+      },
+      ...(includeSet.has('validated_payments')
+        ? {
+            movements_ref: {
+              where: {
+                estado: 'validado',
+                tipo_movimiento_general: 'entrada',
+                tipo_movimiento_especifico: 'pago_garantia',
+              },
+              select: {
+                id: true,
+                user_id: true,
+                monto: true,
+                moneda: true,
+                concepto: true,
+                numero_operacion: true,
+                fecha_pago: true,
+                fecha_resolucion: true,
+                created_at: true,
+              },
+              orderBy: { created_at: 'asc' },
+            },
+          }
+        : {}),
+    };
     
     // Ejecutar consulta con paginación
     const [auctions, total] = await Promise.all([
       prisma.auction.findMany({
         where,
-        include: {
-          asset: {
-            select: {
-              placa: true,
-              marca: true,
-              modelo: true,
-              año: true,
-              empresa_propietaria: true,
-            },
-          },
-          guarantees: {
-            where: { estado: 'activa' },
-            include: {
-              user: {
-                select: {
-                  first_name: true,
-                  last_name: true,
-                  document_type: true,
-                  document_number: true,
-                },
-              },
-            },
-            take: 1,
-          },
-        },
+        include: prismaInclude,
         orderBy: { created_at: 'desc' },
         skip: offset,
         take: parseInt(limit),
@@ -163,10 +198,35 @@ class AuctionService {
       prisma.auction.count({ where }),
     ]);
     
+    // include=winner → cargar detalles de la Guarantee ganadora (id_offerWin) en batch
+    let winnerMap = new Map();
+    if (includeSet.has('winner')) {
+      const winnerIds = auctions
+        .map(a => a.id_offerWin)
+        .filter(Boolean);
+      if (winnerIds.length > 0) {
+        const winners = await prisma.guarantee.findMany({
+          where: { id: { in: winnerIds } },
+          include: {
+            user: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                document_type: true,
+                document_number: true,
+              },
+            },
+          },
+        });
+        winnerMap = new Map(winners.map(w => [w.id, w]));
+      }
+    }
+    
     // Formatear resultados
     const formattedAuctions = auctions.map(auction => {
       const activeWinner = auction.guarantees[0] || null;
-      return {
+      const base = {
         id: auction.id,
         asset: auction.asset,
         estado: auction.estado,
@@ -182,6 +242,40 @@ class AuctionService {
         } : null,
         created_at: auction.created_at,
       };
+  
+      if (includeSet.has('validated_payments') && Array.isArray(auction.movements_ref)) {
+        base.validated_payments = auction.movements_ref.map(m => ({
+          id: m.id,
+          user_id: m.user_id,
+          monto: m.monto,
+          moneda: m.moneda,
+          concepto: m.concepto,
+          numero_operacion: m.numero_operacion,
+          fecha_pago: m.fecha_pago,
+          fecha_resolucion: m.fecha_resolucion,
+          created_at: m.created_at,
+        }));
+      }
+  
+      if (includeSet.has('winner') && auction.id_offerWin) {
+        const w = winnerMap.get(auction.id_offerWin);
+        base.winner_guarantee = w ? {
+          id: w.id,
+          user: {
+            id: w.user?.id || null,
+            first_name: w.user?.first_name || null,
+            last_name: w.user?.last_name || null,
+            document_type: w.user?.document_type || null,
+            document_number: w.user?.document_number || null,
+          },
+          monto_oferta: w.monto_oferta,
+          posicion_ranking: w.posicion_ranking ?? null,
+          estado: w.estado,
+          fecha_limite_pago: w.fecha_limite_pago || null,
+        } : null;
+      }
+  
+      return base;
     });
     
     const pagination = paginationHelpers.generatePaginationMeta(page, limit, total);
@@ -192,39 +286,114 @@ class AuctionService {
   /**
    * Obtener detalle de subasta específica
    */
-  async getAuctionById(auctionId) {
-    const auction = await prisma.auction.findUnique({
-      where: { id: auctionId },
-      include: {
-        asset: true,
-        guarantees: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                first_name: true,
-                last_name: true,
-                document_type: true,
-                document_number: true,
-                phone_number: true,
-              },
+  async getAuctionById(auctionId, includeRaw = '') {
+    const includeSet = new Set(
+      String(includeRaw)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+  
+    const prismaInclude = {
+      asset: true,
+      guarantees: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              document_type: true,
+              document_number: true,
+              phone_number: true,
             },
           },
-          orderBy: { posicion_ranking: 'asc' },
         },
+        orderBy: { posicion_ranking: 'asc' },
       },
+      ...(includeSet.has('validated_payments')
+        ? {
+            movements_ref: {
+              where: {
+                estado: 'validado',
+                tipo_movimiento_general: 'entrada',
+                tipo_movimiento_especifico: 'pago_garantia',
+              },
+              select: {
+                id: true,
+                user_id: true,
+                monto: true,
+                moneda: true,
+                concepto: true,
+                numero_operacion: true,
+                fecha_pago: true,
+                fecha_resolucion: true,
+                created_at: true,
+              },
+              orderBy: { created_at: 'asc' },
+            },
+          }
+        : {}),
+    };
+  
+    const auction = await prisma.auction.findUnique({
+      where: { id: auctionId },
+      include: prismaInclude,
     });
     
     if (!auction) {
       throw BusinessErrors.AuctionNotFound();
     }
-
+  
     // Compatibilidad: inyectar fecha_limite_pago desde Guarantee ganadora
     const winner = auction.guarantees.find(g => g.id === auction.id_offerWin) || auction.guarantees[0] || null;
-    return {
-      ...auction,
+  
+    const response = {
+      id: auction.id,
+      asset: auction.asset,
+      estado: auction.estado,
+      id_offerWin: auction.id_offerWin,
+      fecha_resultado_general: auction.fecha_resultado_general,
+      finished_at: auction.finished_at,
+      created_at: auction.created_at,
+      updated_at: auction.updated_at,
+      guarantees: auction.guarantees,
       fecha_limite_pago: winner?.fecha_limite_pago || null,
     };
+  
+    if (includeSet.has('validated_payments') && Array.isArray(auction.movements_ref)) {
+      response.validated_payments = auction.movements_ref.map(m => ({
+        id: m.id,
+        user_id: m.user_id,
+        monto: m.monto,
+        moneda: m.moneda,
+        concepto: m.concepto,
+        numero_operacion: m.numero_operacion,
+        fecha_pago: m.fecha_pago,
+        fecha_resolucion: m.fecha_resolucion,
+        created_at: m.created_at,
+      }));
+    }
+ 
+    if (includeSet.has('winner') && auction.id_offerWin) {
+      const w = auction.guarantees.find(g => g.id === auction.id_offerWin);
+      response.winner_guarantee = w ? {
+        id: w.id,
+        user: {
+          id: w.user?.id || null,
+          first_name: w.user?.first_name || null,
+          last_name: w.user?.last_name || null,
+          document_type: w.user?.document_type || null,
+          document_number: w.user?.document_number || null,
+        },
+        monto_oferta: w.monto_oferta,
+        posicion_ranking: w.posicion_ranking ?? null,
+        estado: w.estado,
+        fecha_limite_pago: w.fecha_limite_pago || null,
+      } : null;
+    }
+ 
+    return response;
   }
   
   /**
@@ -560,15 +729,78 @@ class AuctionService {
 
       switch (resultado) {
         case 'ganada': {
-          // RN07: Mantener retenido sin cambios hasta facturación, solo notificar
+          // HU-COMP-02:
+          // - Crear Billing automático con datos parciales (idempotente)
+          // - Liberar saldo_retenido inmediatamente (restar garantía)
+          // - Notificar al cliente con referencia al billing creado
+          const existingBilling = await tx.billing.findFirst({
+            where: { auction_id: auctionId, user_id: userId },
+          });
+
+          let billingRecord = existingBilling;
+
+          if (!existingBilling) {
+            // Calcular monto de garantía validada para esta subasta
+            const agg = await tx.movement.aggregate({
+              _sum: { monto: true },
+              where: {
+                user_id: userId,
+                estado: 'validado',
+                tipo_movimiento_general: 'entrada',
+                tipo_movimiento_especifico: 'pago_garantia',
+                auction_id_ref: auctionId,
+              },
+            });
+            let montoGarantia = Number(agg._sum.monto || 0);
+
+            // Fallback: 8% de la oferta ganadora si no hay movimientos (consistencia)
+            if (montoGarantia <= 0) {
+              const winningGuarantee = auction.guarantees.find(o => o.id === auction.id_offerWin);
+              const baseOferta = Number(winningGuarantee?.monto_oferta || 0);
+              if (baseOferta > 0 && businessCalculations?.calculateGuaranteeAmount) {
+                montoGarantia = businessCalculations.calculateGuaranteeAmount(baseOferta);
+              }
+            }
+
+            const concepto = `Factura por Subasta ${updatedAuction.asset?.marca ?? ''} ${updatedAuction.asset?.modelo ?? ''} ${updatedAuction.asset?.año ?? ''} - Placa: ${updatedAuction.asset?.placa ?? ''}`.trim();
+
+            billingRecord = await tx.billing.create({
+              data: {
+                user_id: userId,
+                billing_document_type: null,
+                billing_document_number: null,
+                billing_name: null,
+                monto: montoGarantia,
+                moneda: 'USD',
+                concepto,
+                auction_id: auctionId,
+              },
+            });
+
+            // Liberar retenido inmediatamente: restar el monto de esta garantía
+            if (montoGarantia > 0) {
+              const currentUser = await tx.user.findUnique({
+                where: { id: userId },
+                select: { saldo_retenido: true },
+              });
+              const newRetenido = Number(
+                Math.max(0, Number(currentUser?.saldo_retenido || 0) - montoGarantia).toFixed(2)
+              );
+              await tx.user.update({
+                where: { id: userId },
+                data: { saldo_retenido: newRetenido },
+              });
+            }
+          }
+
           await notifySafe('competencia_ganada', {
             uid: userId,
             titulo: '¡BOB ganó la competencia!',
-            mensaje: `BOB ganó la competencia externa para la subasta ${updatedAuction.asset?.placa ?? ''}. Completa tus datos de facturación.`,
-            reference_type: 'auction',
-            reference_id: auctionId,
+            mensaje: `BOB ganó la competencia externa para la subasta ${updatedAuction.asset?.placa ?? ''}. Complete sus datos de facturación para finalizar el proceso.`,
+            reference_type: 'billing',
+            reference_id: billingRecord?.id ?? null,
           });
-          // NO recalcular retenido: debe mantenerse igual hasta la facturación
+
           break;
         }
         case 'perdida': {

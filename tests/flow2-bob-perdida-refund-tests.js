@@ -294,11 +294,11 @@ if (!(balAfterPerdida.saldo_disponible >= balAfterApprove.saldo_disponible)) {
   await processRefund(adminHeaders, refundId);
   const balAfterRefundProcess = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterRefundProcess);
-  // Efecto devolver_dinero (salida): total -garantia, retenido sin cambios, disponible -garantia
+  // Efecto devolver_dinero (salida): total -garantia, retenido sin cambios (respecto a 'perdida'), disponible SIN CAMBIO respecto a la SOLICITUD/CONFIRMACIÓN
   assertEq2('Total tras procesar reembolso (disminuye)', balAfterRefundProcess.saldo_total, approx2(balAfterPerdida.saldo_total - garantia));
   assertEq2('Retenido tras procesar reembolso (sin cambio)', balAfterRefundProcess.saldo_retenido, balAfterPerdida.saldo_retenido);
   assertEq2('Aplicado tras procesar reembolso (sin cambio)', balAfterRefundProcess.saldo_aplicado, balAfterPerdida.saldo_aplicado);
-  assertEq2('Disponible tras procesar reembolso (disminuye)', balAfterRefundProcess.saldo_disponible, approx2(balAfterPerdida.saldo_disponible - garantia));
+  assertEq2('Disponible tras procesar reembolso (sin cambio)', balAfterRefundProcess.saldo_disponible, balAfterRefundRequest.saldo_disponible);
 
   console.log('\n✅ FLUJO 2 completado. Retención se mantuvo en "perdida" y se liberó al procesar reembolso. Deltas correctos.');
 }

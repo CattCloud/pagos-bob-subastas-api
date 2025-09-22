@@ -102,34 +102,23 @@ function uniquePlate(prefix) {
 }
 
 async function createAuction(adminHeaders, asset) {
-  const now = Date.now();
-  const startISO = new Date(now + 5000).toISOString();   // inicia en ~5s
-  const endISO = new Date(now + 3600000).toISOString();  // +1h
-  const payload = {
-    fecha_inicio: startISO,
-    fecha_fin: endISO,
-    asset,
-  };
+  const payload = { asset };
   const { res, data } = await req('/auctions', { method: 'POST', headers: adminHeaders, body: payload });
   if (!res.ok) throw new Error('Crear subasta falló');
-  return { id: data.data.auction.id, startISO, endISO };
+  return { id: data.data.auction.id };
 }
 
-async function setWinner(adminHeaders, auctionId, userId, montoOferta, fechaOfertaISO) {
+async function setWinner(adminHeaders, auctionId, userId, montoOferta) {
   const payload = {
     user_id: userId,
     monto_oferta: montoOferta,
-    fecha_oferta: fechaOfertaISO,
     fecha_limite_pago: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
   };
   const { res } = await req(`/auctions/${auctionId}/winner`, { method: 'POST', headers: adminHeaders, body: payload });
   if (!res.ok) throw new Error('Registrar ganador falló');
 }
 
-async function registerGuaranteePayment(clientHeaders, auctionId, guaranteeAmount, startISO, concepto) {
-  const waitMs = new Date(startISO).getTime() - Date.now() + 1500;
-  if (waitMs > 0) await delay(waitMs);
-
+async function registerGuaranteePayment(clientHeaders, auctionId, guaranteeAmount, _unused, concepto) {
   const form = new FormData();
   form.append('auction_id', auctionId);
   form.append('monto', String(guaranteeAmount));
@@ -264,34 +253,34 @@ async function run() {
   const placaC = uniquePlate('C6');
   const placaD = uniquePlate('D6');
 
-  const { id: auctionA, startISO: startA } = await createAuction(adminHeaders, {
+  const { id: auctionA } = await createAuction(adminHeaders, {
     placa: placaA, empresa_propietaria: 'EMPRESA A S.A.',
     marca: 'Honda', modelo: 'Civic', año: 2020, descripcion: 'Subasta A - Honda Civic 2020'
   });
-  const { id: auctionB, startISO: startB } = await createAuction(adminHeaders, {
+  const { id: auctionB } = await createAuction(adminHeaders, {
     placa: placaB, empresa_propietaria: 'EMPRESA B S.A.',
     marca: 'Toyota', modelo: 'Corolla', año: 2021, descripcion: 'Subasta B - Toyota Corolla 2021'
   });
-  const { id: auctionC, startISO: startC } = await createAuction(adminHeaders, {
+  const { id: auctionC } = await createAuction(adminHeaders, {
     placa: placaC, empresa_propietaria: 'EMPRESA C S.A.',
     marca: 'Nissan', modelo: 'Sentra', año: 2019, descripcion: 'Subasta C - Nissan Sentra 2019'
   });
-  const { id: auctionD, startISO: startD } = await createAuction(adminHeaders, {
+  const { id: auctionD } = await createAuction(adminHeaders, {
     placa: placaD, empresa_propietaria: 'EMPRESA D S.A.',
     marca: 'Hyundai', modelo: 'Elantra', año: 2022, descripcion: 'Subasta D - Hyundai Elantra 2022'
   });
 
   // Registrar ganador en las 4
-  await setWinner(adminHeaders, auctionA, clientId, ofertaA, new Date(new Date(startA).getTime() + 5000).toISOString());
-  await setWinner(adminHeaders, auctionB, clientId, ofertaB, new Date(new Date(startB).getTime() + 5000).toISOString());
-  await setWinner(adminHeaders, auctionC, clientId, ofertaC, new Date(new Date(startC).getTime() + 5000).toISOString());
-  await setWinner(adminHeaders, auctionD, clientId, ofertaD, new Date(new Date(startD).getTime() + 5000).toISOString());
+  await setWinner(adminHeaders, auctionA, clientId, ofertaA);
+  await setWinner(adminHeaders, auctionB, clientId, ofertaB);
+  await setWinner(adminHeaders, auctionC, clientId, ofertaC);
+  await setWinner(adminHeaders, auctionD, clientId, ofertaD);
 
   // Registrar pagos de garantía (pendientes)
-  const movA = await registerGuaranteePayment(clientHeaders, auctionA, garantiaA, startA, 'Garantía A');
-  const movB = await registerGuaranteePayment(clientHeaders, auctionB, garantiaB, startB, 'Garantía B');
-  const movC = await registerGuaranteePayment(clientHeaders, auctionC, garantiaC, startC, 'Garantía C');
-  const movD = await registerGuaranteePayment(clientHeaders, auctionD, garantiaD, startD, 'Garantía D');
+  const movA = await registerGuaranteePayment(clientHeaders, auctionA, garantiaA, null, 'Garantía A');
+  const movB = await registerGuaranteePayment(clientHeaders, auctionB, garantiaB, null, 'Garantía B');
+  const movC = await registerGuaranteePayment(clientHeaders, auctionC, garantiaC, null, 'Garantía C');
+  const movD = await registerGuaranteePayment(clientHeaders, auctionD, garantiaD, null, 'Garantía D');
 
   // Aprobaciones admin
   await approvePayment(adminHeaders, movA);
@@ -308,21 +297,28 @@ async function run() {
   assertEq2('Disponible tras validar 4 pagos', balAfterApprovals.saldo_disponible, 0);
 
   // Resultados mixtos
-  // 5A) A: ganada
+  // 5A) A: ganada → Billing parcial automático, retenido -= A, aplicado += A
   await setCompetitionResult(adminHeaders, auctionA, 'ganada', 'BOB ganó A');
   const balAfterA = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterA);
-  assertEq2('Total tras A ganada (sin cambio)', balAfterA.saldo_total, balAfterApprovals.saldo_total);
-  assertEq2('Retenido tras A ganada (sin cambio)', balAfterA.saldo_retenido, balAfterApprovals.saldo_retenido);
+  assertEq2('Total tras A ganada (igual)', balAfterA.saldo_total, balAfterApprovals.saldo_total);
+  assertEq2('Retenido tras A ganada (-A)', balAfterA.saldo_retenido, approx2(balAfterApprovals.saldo_retenido - garantiaA));
+  assertEq2('Aplicado tras A ganada (+A)', balAfterA.saldo_aplicado, approx2(balAfterApprovals.saldo_aplicado + garantiaA));
   assertEq2('Disponible tras A ganada (sin cambio)', balAfterA.saldo_disponible, balAfterApprovals.saldo_disponible);
 
-  // 5B) B: perdida
+  // 5B) B: perdida → reembolso automático (entrada) libera B del retenido (recalc global)
   await setCompetitionResult(adminHeaders, auctionB, 'perdida', 'BOB perdió B');
   const balAfterB = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterB);
-  assertEq2('Total tras B perdida (sin cambio)', balAfterB.saldo_total, balAfterA.saldo_total);
-  assertEq2('Retenido tras B perdida (sin cambio)', balAfterB.saldo_retenido, balAfterA.saldo_retenido);
-  assertEq2('Disponible tras B perdida (sin cambio)', balAfterB.saldo_disponible, balAfterA.saldo_disponible);
+  assertEq2('Total tras B perdida (igual)', balAfterB.saldo_total, balAfterA.saldo_total);
+  // Retenido se recalcula globalmente: suma de garantías (A+B+C+D) - reembolsos (B)
+  const expectedRetB = approx2(balAfterApprovals.saldo_retenido - garantiaB);
+  assertEq2('Retenido tras B perdida (global -B)', balAfterB.saldo_retenido, expectedRetB);
+  // Aplicado no cambia respecto a A
+  assertEq2('Aplicado tras B perdida (sin cambio)', balAfterB.saldo_aplicado, balAfterA.saldo_aplicado);
+  // Disponible ajustado por fórmula con aplicado de A y retenido global esperado
+  const expectedDispB = approx2(balAfterB.saldo_total - expectedRetB - balAfterA.saldo_aplicado);
+  assertEq2('Disponible tras B perdida (ajustado)', balAfterB.saldo_disponible, expectedDispB);
 
   // 5C) C: penalizada (cliente no pagó) → penalidad 30%
   await setCompetitionResult(adminHeaders, auctionC, 'penalizada', 'Cliente no pagó C');
@@ -336,30 +332,24 @@ async function run() {
   const dispExpectedAfterC = approx2(balAfterB.saldo_disponible + (garantiaC - expectedPenaltyC));
   assertEq2('Disponible tras penalidad C', balAfterC.saldo_disponible, dispExpectedAfterC);
 
-  // 5D) D: perdida
+  // 5D) D: perdida → reembolso automático (entrada) libera D del retenido
   await setCompetitionResult(adminHeaders, auctionD, 'perdida', 'BOB perdió D');
   const balAfterD = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterD);
-  assertEq2('Total tras D perdida (sin cambio)', balAfterD.saldo_total, balAfterC.saldo_total);
-  assertEq2('Retenido tras D perdida (sin cambio)', balAfterD.saldo_retenido, balAfterC.saldo_retenido);
-  assertEq2('Disponible tras D perdida (sin cambio)', balAfterD.saldo_disponible, balAfterC.saldo_disponible);
+  assertEq2('Total tras D perdida (igual)', balAfterD.saldo_total, balAfterC.saldo_total);
+  assertEq2('Retenido tras D perdida (-D)', balAfterD.saldo_retenido, approx2(balAfterC.saldo_retenido - garantiaD));
+  assertEq2('Aplicado tras D perdida (sin cambio)', balAfterD.saldo_aplicado, balAfterC.saldo_aplicado);
+  assertEq2('Disponible tras D perdida (+D)', balAfterD.saldo_disponible, approx2(balAfterC.saldo_disponible + garantiaD));
 
-  // 6A) Facturación de A (aplica garantía A)
-  await createBilling(clientHeaders, auctionA, 'Roberto Mixto');
-  const balAfterBillA = await getBalance(clientHeaders, clientId);
-  assertFormula(balAfterBillA);
-  assertEq2('Retenido tras billing A', balAfterBillA.saldo_retenido, balAfterD.saldo_retenido - garantiaA);
-  assertEq2('Aplicado tras billing A', balAfterBillA.saldo_aplicado, balAfterD.saldo_aplicado + garantiaA);
-  assertEq2('Total tras billing A (sin cambio)', balAfterBillA.saldo_total, balAfterD.saldo_total);
-  // disponible = total - retenido - aplicado
-  assertFormula(balAfterBillA);
+  // 6A) Completar facturación de A (opcional) — SIN CAMBIOS DE SALDOS (billing parcial ya creado en 'ganada')
+  const balAfterBillA = balAfterD;
 
   // 6B) Refund B devolver_dinero (1000)
   // Crear
   let { res: resRB, data: dataRB } = await req('/refunds', {
     method: 'POST',
     headers: clientHeaders,
-    body: { auction_id: auctionB, monto_solicitado: garantiaB, tipo_reembolso: 'devolver_dinero', motivo: 'Refund B' },
+    body: { auction_id: auctionB, monto_solicitado: garantiaB, tipo_reembolso: 'devolver_dinero', motivo: 'Refund B - devolver dinero' },
   });
   if (!resRB.ok) throw new Error('Crear refund B falló');
   const refundIdB = dataRB.data.refund.id;
@@ -370,7 +360,7 @@ async function run() {
 
   const balAfterRefundB = await getBalance(clientHeaders, clientId);
   assertFormula(balAfterRefundB);
-  // total -1000, retenido -1000, disponible sin cambio
+  // total -1000, retenido -1000 (libera retención de la solicitud), disponible sin cambio respecto a solicitud
   assertEq2('Total tras refund B (devolver)', balAfterRefundB.saldo_total, balAfterBillA.saldo_total - garantiaB);
   assertEq2('Retenido tras refund B (devolver)', balAfterRefundB.saldo_retenido, balAfterBillA.saldo_retenido - garantiaB);
   assertEq2('Aplicado tras refund B (devolver)', balAfterRefundB.saldo_aplicado, balAfterBillA.saldo_aplicado);

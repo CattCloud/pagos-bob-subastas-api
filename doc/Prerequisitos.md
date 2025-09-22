@@ -591,8 +591,7 @@ Estados de solicitud de reembolso
 ### **ADMIN - Menú Lateral:**
 -  **Pagos de Garantía** (pantalla principal)
 -  **Gestión de Subastas** 
--  **Nueva Subasta**
--  **Resultados de Competencia**
 -  **Gestión de Saldos** (con sistema de transacciones)
 -  **Gestión de Facturación**
 -  **Gestión de Reembolsos**
+-  **Notificaciones**

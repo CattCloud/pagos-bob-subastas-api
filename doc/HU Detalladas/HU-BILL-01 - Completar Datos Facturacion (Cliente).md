@@ -1,8 +1,8 @@
-# HU-BILL-01 — Completar Datos de Facturación (Cliente)
+# HU-BILL-01 — Completar Datos de Facturación (Cliente/Admin)
 
 ## **Historia:**
 
-Como **cliente**, quiero completar mis datos de facturación cuando BOB gana la competencia externa, para que se genere el registro Billing correspondiente y se aplique mi saldo de garantía al pago del vehículo.
+Como **cliente** (o **admin**), quiero completar los datos de facturación faltantes en un Billing ya creado automáticamente cuando BOB ganó la competencia, para finalizar el proceso de facturación y que mi saldo de garantía quede correctamente aplicado.
 
 ---
 
@@ -10,44 +10,43 @@ Como **cliente**, quiero completar mis datos de facturación cuando BOB gana la 
 
 ### **Condiciones Funcionales:**
 
-- **CA-01:** **Acceso desde notificación:**
-    - Aparece opción "Completar Facturación" en menú cliente cuando recibe notificación `competencia_ganada`
+- **CA-01:** **Acceso múltiple:**
+    - **Cliente:** Desde notificación `competencia_ganada` → enlace a "Completar Facturación"
+    - **Cliente:** Desde "Mis Facturaciones" → botón "Completar Datos de Facturación" (si faltan datos)
+    - **Admin:** Desde "Gestión de Facturaciones" → botón "Completar Datos de Facturación" (si faltan datos)
     - Badge de alerta hasta completar datos
-    - Link directo desde correo electrónico recibido
-- **CA-02:** **Mostrar información de subasta ganada:**
+- **CA-02:** **Mostrar información del Billing existente:**
+    - **Estado actual:** "Datos de facturación pendientes"
     - Datos del vehículo (marca, modelo, año, placa)
-    - Monto de garantía pagado que será aplicado
-    - Mensaje de felicitación: "¡BOB ganó la competencia por su vehículo!"
-- **CA-03:** **Formulario con campos obligatorios:**
+    - Monto ya aplicado (saldo_retenido ya liberado)
+    - Fecha de creación del Billing
+    - Concepto ya generado automáticamente
+- **CA-03:** **Formulario con campos faltantes:**
     - `billing_document_type` (radio): **RUC** | **DNI** *obligatorio*
     - `billing_document_number` (texto) *obligatorio*
     - `billing_name` (texto) - Nombre completo o Razón Social *obligatorio*
-    - **Campo automático:** `concepto` se genera automáticamente: "Compra vehículo [marca] [modelo] [año] - Subasta #[id]"
+    - **Campos automáticos ya definidos:** monto, concepto, moneda (mostrar como solo lectura)
 - **CA-04:** **Al confirmar datos:**
-    - Crear registro en `Billing`:
-        - `user_id` = cliente actual
+    - **Actualizar registro Billing existente** con:
         - `billing_document_type`, `billing_document_number`, `billing_name` = datos ingresados
-        - `monto` = monto de garantía de la subasta
-        - `moneda` = 'USD'
-        - `concepto` = generado automáticamente
-        - `auction_id` = subasta relacionada
-        - `created_at` = now()
-    - Actualizar `Auction.estado = facturada`
-    - Backend ejecuta función para recalcular `User.saldo_retenido` INMEDIATAMENTE (pasa a 0)
+        - `updated_at` = now()
+    - **NO crear nuevo Billing** (ya existe desde HU-COMP-02)
+    - **NO recalcular saldo_retenido** (ya fue liberado en HU-COMP-02)
     - Crear notificación de confirmación para cliente y admin
 
 ---
 
 ### **Validaciones de Negocio:**
 
-- **VN-01:** Solo permitir acceso si subasta está en estado `ganada`
-- **VN-02:** Verificar que el cliente es el ganador de la subasta (`id_offerWin`)
-- **VN-03:** `billing_document_number` debe cumplir formato según tipo:
+- **VN-01:** Solo permitir acceso si existe Billing para la subasta/usuario con datos de facturación pendientes (billing_document_type = NULL)
+- **VN-02:** **Para cliente:** Verificar que es el dueño del Billing
+- **VN-03:** **Para admin:** Puede completar datos de cualquier Billing pendiente
+- **VN-04:** `billing_document_number` debe cumplir formato según tipo:
     - **DNI:** 8 dígitos exactos
     - **RUC:** 11 dígitos exactos
-- **VN-04:** `billing_name` debe tener entre 3-200 caracteres
-- **VN-05:** No permitir duplicar `billing_document_number` para el mismo cliente
-- **VN-06:** Verificar que no existe Billing previo para esta subasta
+- **VN-05:** `billing_name` debe tener entre 3-200 caracteres
+- **VN-06:** No permitir duplicar `billing_document_number` para el mismo usuario
+- **VN-07:** Verificar que el Billing existe y tiene datos pendientes antes de actualizar
 
 ---
 
@@ -100,39 +99,48 @@ Como **cliente**, quiero completar mis datos de facturación cuando BOB gana la 
 
 ### **Cálculo de Saldos Actualizado:**
 
-**Antes de completar facturación:**
+**Después de procesar resultado "BOB ganó" (HU-COMP-02):**
 ```
 Estado: ganada
-Saldo Retenido: $960 (dinero congelado)
-Saldo Aplicado: $0
-Saldo Disponible: Total - $960 - $0
+Billing: Creado con datos parciales
+Saldo Retenido: $0 (dinero ya liberado)
+Saldo Aplicado: $960 (aplicado vía Billing)
+Saldo Disponible: Total - $0 - $960
 ```
 
-**Después de completar facturación:**
+**Después de completar datos de facturación (HU-BILL-01):**
 ```
-Estado: facturada  
-Saldo Retenido: $0 (dinero ya no congelado)
-Saldo Aplicado: $960 (aplicado vía Billing)
-Saldo Disponible: Total - $0 - $960 (mismo resultado, diferente distribución)
+Estado: ganada (sin cambio)
+Billing: Completado con todos los datos
+Saldo Retenido: $0 (sin cambio)
+Saldo Aplicado: $960 (sin cambio)
+Saldo Disponible: Total - $0 - $960 (sin cambio)
 ```
+
+**Nota:** Los saldos no cambian en esta HU, solo se completan los datos de facturación del Billing ya creado.
 
 ---
 
 ## **REGLAS ESPECÍFICAS DEL MÓDULO**
 
 ### **Seguridad:**
-- Solo el cliente ganador puede acceder al formulario
-- Datos de facturación no se pueden modificar una vez confirmados
-- Validación de sesión activa del cliente
+- **Cliente:** Solo puede completar sus propios Billings pendientes
+- **Admin:** Puede completar datos de cualquier Billing pendiente
+- Datos de facturación no se pueden modificar una vez completados
+- Validación de sesión activa
 
 ### **Performance:**
-- Carga de datos de subasta optimizada
-- Generación de concepto automática
-- Actualización de cache de saldo en tiempo real
+- Carga de datos de Billing existente optimizada
+- No requiere cálculos de saldo (ya procesados en HU-COMP-02)
+- Actualización directa del registro Billing
 
 ### **Experiencia:**
-- Proceso guiado paso a paso
-- Información clara del impacto en saldos
-- Confirmación visual del éxito
+- Proceso simplificado (solo completar datos faltantes)
+- Información clara de que el saldo ya fue aplicado
+- Confirmación visual de datos completados exitosamente
+
+### **Acceso Dual:**
+- **Ruta Cliente:** `/users/:userId/billings` → "Completar Datos de Facturación"
+- **Ruta Admin:** `/billing` → "Completar Datos de Facturación" (en Billings pendientes)
 
 ---

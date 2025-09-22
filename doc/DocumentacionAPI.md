@@ -127,25 +127,55 @@ GET /auctions
   - search: placa/marca/modelo/empresa
   - fecha_desde, fecha_hasta: ISO (filtra por created_at)
   - page, limit
+  - include (opcional, CSV):
+    - validated_payments → adjunta movements de pago de garantía con estado "validado" de esa subasta
+    - winner → adjunta winner_guarantee con datos de la Guarantee ganadora (id_offerWin) y usuario
 - Respuesta 200:
 {
   "success": true,
   "data": {
     "auctions": [
       {
-        "id": "...",
-        "asset": { placa, marca, modelo, año, empresa_propietaria },
-        "estado": "activa",
-        "fecha_limite_pago": "ISO | null", // computado desde Guarantee ganadora
+        "id": "cauc...",
+        "asset": { "placa":"ABC-123", "marca":"Toyota", "modelo":"Corolla", "año":2020, "empresa_propietaria":"EMPRESA S.A." },
+        "estado": "activa|pendiente|...",
+        "fecha_limite_pago": "ISO|null", // computado desde Guarantee ganadora
         "winner": {
           "name": "string",
           "document": "string",
           "monto_oferta": 1250.00
         } | null,
-        "created_at": "ISO"
+        "created_at": "ISO",
+        "winner_guarantee": {              // presente solo si include=winner
+          "id": "cgua...",
+          "user": {
+            "id": "cusr...",
+            "first_name": "Juan",
+            "last_name": "Pérez",
+            "document_type": "DNI",
+            "document_number": "12345678"
+          },
+          "monto_oferta": 1250.00,
+          "posicion_ranking": 1,
+          "estado": "activa|ganadora|perdedora",
+          "fecha_limite_pago": "ISO|null"
+        },
+        "validated_payments": [            // presente solo si include=validated_payments
+          {
+            "id": "cmov...",
+            "user_id": "cusr...",
+            "monto": 100.00,
+            "moneda": "USD",
+            "concepto": "Pago de garantía",
+            "numero_operacion": "OP-123",
+            "fecha_pago": "ISO",
+            "fecha_resolucion": "ISO|null",
+            "created_at": "ISO"
+          }
+        ]
       }
     ],
-    "pagination": { page, limit, total, total_pages }
+    "pagination": { "page": 1, "limit": 20, "total": 10, "total_pages": 1 }
   }
 }
 
@@ -166,13 +196,52 @@ POST /auctions
 
 GET /auctions/:id
 - Descripción: Detalle de subasta
+- Query:
+  - include (opcional, CSV):
+    - validated_payments → adjunta movements de pago de garantía con estado "validado" de esa subasta
+    - winner → adjunta winner_guarantee con datos de la Guarantee ganadora (id_offerWin) y usuario
 - Respuesta 200:
 {
   "success": true,
   "data": {
     "auction": {
-      ...,
-      "fecha_limite_pago": "ISO|null" // computado desde Guarantee ganadora
+      "id": "cauc...",
+      "asset": { "placa":"ABC-123", "marca":"Toyota", "modelo":"Corolla", "año":2020, "empresa_propietaria":"EMPRESA S.A.", "descripcion":"..." },
+      "estado": "activa|pendiente|...",
+      "id_offerWin": "cgua...",
+      "fecha_resultado_general": "ISO|null",
+      "finished_at": "ISO|null",
+      "created_at": "ISO",
+      "updated_at": "ISO",
+      "guarantees": [ { ... incluye user con {id, first_name, last_name, document_type, document_number, phone_number} ... } ],
+      "fecha_limite_pago": "ISO|null", // computado desde Guarantee ganadora
+      "winner_guarantee": {            // presente solo si include=winner
+        "id": "cgua...",
+        "user": {
+          "id": "cusr...",
+          "first_name": "Juan",
+          "last_name": "Pérez",
+          "document_type": "DNI",
+          "document_number": "12345678"
+        },
+        "monto_oferta": 1250.00,
+        "posicion_ranking": 1,
+        "estado": "activa|ganadora|perdedora",
+        "fecha_limite_pago": "ISO|null"
+      },
+      "validated_payments": [          // presente solo si include=validated_payments
+        {
+          "id": "cmov...",
+          "user_id": "cusr...",
+          "monto": 100.00,
+          "moneda": "USD",
+          "concepto": "Pago de garantía",
+          "numero_operacion": "OP-123",
+          "fecha_pago": "ISO",
+          "fecha_resolucion": "ISO|null",
+          "created_at": "ISO"
+        }
+      ]
     }
   }
 }
@@ -409,6 +478,7 @@ GET /users/:userId/movements
         "monto":100.00,
         "moneda":"USD",
         "estado":"validado",
+        "concepto": "...",
         "numero_operacion":"OP-..",
         "fecha_pago":"ISO",
         "fecha_resolucion":"ISO",
@@ -455,8 +525,49 @@ GET /users/:userId/movements
 
 GET /users/:userId/won-auctions
 - Descripción: Subastas donde el usuario es ganador (Guarantee posicion_ranking = 1)
-- Query: estado?, page, limit
-- Respuesta incluye estado y fecha_limite_pago desde Guarantee
+- Auth: Admin (cualquiera), Cliente (solo propio)
+- Query:
+  - estado (opcional, CSV): filtra por estado de la Guarantee (activa|ganadora|perdedora)
+  - page, limit
+- Respuesta 200:
+{
+  "success": true,
+  "data": {
+    "won_auctions": [
+      {
+        "guarantee_id": "cgua...",
+        "auction": {
+          "id": "cauc...",
+          "estado": "pendiente|en_validacion|finalizada|ganada|perdida|penalizada|facturada",
+          "fecha_limite_pago": "ISO|null",
+          "asset": {
+            "placa": "ABC-123",
+            "marca": "Toyota",
+            "modelo": "Corolla",
+            "año": 2020,
+            "empresa_propietaria": "EMPRESA S.A."
+          }
+        },
+        "guarantee_details": {
+          "monto_oferta": 1250.00,
+          "monto_garantia": 100.00,     // 8% calculado
+          "estado": "activa|ganadora|perdedora"
+        },
+        "payment_status": {
+          "has_payment": true,
+          "movement_id": "cmov...",
+          "estado": "pendiente|validado|rechazado",
+          "monto_pagado": 100.00,
+          "fecha_pago": "ISO"
+        } | {
+          "has_payment": false,
+          "monto_requerido": 100.00
+        }
+      }
+    ],
+    "pagination": { "page": 1, "limit": 20, "total": 3, "total_pages": 1 }
+  }
+}
 
 GET /users/:userId/can-participate
 - Descripción: Indica si el usuario puede participar en nuevas subastas (no tener pagos pendientes)
@@ -473,11 +584,88 @@ POST /users/:userId/movements/manual (Admin)
   }
 - Respuesta 201: { "movement": {...}, "updated_user_cache": { saldo_total, saldo_retenido }, "user": { name, document } }
 
-Resumen de balances (Admin):
-- GET /balances/summary: listado con balance por usuario
-- GET /balances/stats: estadísticas agregadas
-- GET /balances/dashboard: resumen para dashboard
+Resumen de balances (Admin)
 
+GET /balances/summary
+- Descripción: Listado paginado de clientes (user_type='client') con sus saldos calculados
+- Auth: Admin only
+- Implementación: [routes/balances.js](routes/balances.js:32) → [controllers/balanceController.js.getBalancesSummary()](controllers/balanceController.js:84) → [services/balanceService.js.getBalancesSummary()](services/balanceService.js:248)
+- Query:
+  - search (opcional): nombre, documento o email (insensible a mayúsculas)
+  - page (default 1), limit (default 20)
+- Respuesta 200:
+{
+  "success": true,
+  "data": {
+    "balances": [
+      {
+        "user": {
+          "id": "cusr...",
+          "name": "Juan Pérez",
+          "document": "DNI: 12345678",
+          "email": "juan@demo.com",
+          "phone": "+51999999999"
+        },
+        "balance": {
+          "saldo_total": 1500.00,
+          "saldo_retenido": 200.00,
+          "saldo_aplicado": 100.00,
+          "saldo_disponible": 1200.00
+        },
+        "updated_at": "2025-09-22T12:00:00.000Z"
+      }
+    ],
+    "pagination": { "page": 1, "limit": 20, "total": 45, "total_pages": 3 }
+  }
+}
+
+GET /balances/stats
+- Descripción: Estadísticas agregadas de saldos en el sistema (solo clientes: user_type='client')
+- Auth: Admin only
+- Implementación: [routes/balances.js](routes/balances.js:25) → [controllers/balanceController.js.getBalanceStats()](controllers/balanceController.js:108) → [services/balanceService.js.getBalanceStats()](services/balanceService.js:326)
+- Respuesta 200:
+{
+  "success": true,
+  "data": {
+    "statistics": {
+      "saldo_total_sistema": 100000.00,
+      "saldo_retenido_total": 8000.00,
+      "saldo_aplicado_total": 12000.00,
+      "saldo_disponible_total": 80000.00,
+      "total_usuarios_con_saldo": 30,
+      "total_usuarios": 120,
+      "movimientos_mes_actual": 56
+    },
+    "timestamp": "2025-09-22T12:00:00.000Z"
+  }
+}
+
+GET /balances/dashboard
+- Descripción: Resumen para dashboard admin (estadísticas + top balances de clientes únicamente)
+- Auth: Admin only
+- Implementación: [routes/balances.js](routes/balances.js:18) → [controllers/balanceController.js.getDashboardSummary()](controllers/balanceController.js:203)
+- Respuesta 200 (ejemplo):
+{
+  "success": true,
+  "data": {
+    "financial_overview": {
+      "total_dinero_en_sistema": 100000.00,
+      "dinero_retenido": 8000.00,
+      "dinero_aplicado": 12000.00,
+      "dinero_disponible": 80000.00,
+      "usuarios_con_saldo": 30,
+      "movimientos_mes": 56
+    },
+    "top_balances": [
+      {
+        "user": { "id": "cusr...", "name": "Juan Pérez", "document": "DNI 12345678", "email": "juan@demo.com", "phone": "+51999999999" },
+        "balance": { "saldo_total": 5000.00, "saldo_retenido": 0.00, "saldo_aplicado": 1000.00, "saldo_disponible": 4000.00 },
+        "updated_at": "2025-09-22T11:00:00.000Z"
+      }
+    ],
+    "timestamp": "2025-09-22T12:00:00.000Z"
+  }
+}
 --------------------------------------------------------------------------------
 
 6) Reembolsos [routes/refunds.js](routes/refunds.js:1)
